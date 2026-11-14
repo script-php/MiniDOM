@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.29 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.30 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.29';
+    const VERSION = '0.0.30';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -696,21 +696,39 @@
     // An insertion accepts HTML/text, native nodes, MiniDOM selections, and
     // (possibly nested) iterables of these. Raw HTML must be trusted.
     function contentNodes(value) {
-        if (value == null) return [];
-        if (typeof value === 'string') {
-            const template = global.document.createElement('template');
-            template.innerHTML = value;
-            return [...template.content.childNodes];
+        // Flatten nested content without recursion or large argument spreads.
+        // Track only active containers: repeated references are valid, cycles
+        // are not and would otherwise keep the traversal running forever.
+        const result = [];
+        const active = new Set();
+        const stack = [{ value, exit: false }];
+        while (stack.length) {
+            const frame = stack.pop();
+            const item = frame.value;
+            if (frame.exit) { active.delete(item); continue; }
+            if (item == null) continue;
+            if (typeof item === 'string') {
+                const template = global.document.createElement('template');
+                template.innerHTML = item;
+                for (const child of template.content.childNodes) result.push(child);
+            } else if (typeof item === 'number' || typeof item === 'boolean') {
+                result.push(global.document.createTextNode(String(item)));
+            } else if (isNode(item)) {
+                if (item.nodeType === 11) {
+                    for (const child of item.childNodes) result.push(child);
+                } else result.push(item);
+            } else {
+                const iterable = item instanceof Collection ? item.elements : item;
+                if (iterable == null || typeof iterable[Symbol.iterator] !== 'function') continue;
+                if (active.has(iterable)) throw new TypeError('Cyclic DOM content iterable');
+                active.add(iterable);
+                stack.push({ value: iterable, exit: true });
+                const children = Array.from(iterable);
+                for (let i = children.length - 1; i >= 0; i--)
+                    stack.push({ value: children[i], exit: false });
+            }
         }
-        if (typeof value === 'number' || typeof value === 'boolean') {
-            return [global.document.createTextNode(String(value))];
-        }
-        if (value instanceof Collection) return value.elements.flatMap(contentNodes);
-        if (isNode(value)) return value.nodeType === 11 ? [...value.childNodes] : [value];
-        if (typeof value[Symbol.iterator] === 'function') {
-            return [...value].flatMap(contentNodes);
-        }
-        return [];
+        return result;
     }
 
     // For multiple destinations: clone for all but the final destination;
