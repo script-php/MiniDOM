@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.55 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.56 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.55';
+    const VERSION = '0.0.56';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1912,7 +1912,9 @@
         insertBefore(target) { return this._push(insertNodes(select(target), this.elements, 'before')); }
         insertAfter(target) { return this._push(insertNodes(select(target), this.elements, 'after')); }
         replaceAll(target) {
-            const targets = [...select(target)].filter(node => node.parentNode);
+            const targets = [...select(target)].filter(node => node.parentNode &&
+                !this.elements.some(source => source === node ||
+                    (source.contains && source.contains(node))));
             const inserted = [];
             targets.forEach((node, i) => {
                 const copies = i === targets.length - 1 ? this.elements :
