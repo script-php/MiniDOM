@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.3 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.4 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.3';
+    const VERSION = '0.0.4';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -12,8 +12,16 @@
         return value != null && typeof value.nodeType === 'number';
     }
 
+    // One pass: remove duplicates while keeping the first-seen order.
     function unique(items) {
-        return [...new Set(items.filter(Boolean))];
+        const result = [];
+        const seen = new Set();
+        for (const item of items) {
+            if (item == null || seen.has(item)) continue;
+            seen.add(item);
+            result.push(item);
+        }
+        return result;
     }
 
     function nodes(value) {
@@ -27,20 +35,31 @@
     }
 
     function select(value, context) {
-        if (typeof value !== 'string') return unique(nodes(value));
+        if (typeof value !== 'string') return nodes(value);
 
         // A context can itself be a CSS selector, node, or MiniDOM collection.
         const roots = context === undefined
             ? [global.document]
             : typeof context === 'string'
-                ? [...global.document.querySelectorAll(context)]
+                ? global.document.querySelectorAll(context)
                 : nodes(context);
 
-        return unique(roots.flatMap(root =>
-            root && typeof root.querySelectorAll === 'function'
-                ? [...root.querySelectorAll(value)]
-                : []
-        ));
+        // The constructor deduplicates once; avoid extra sets and temporary
+        // arrays when there is only one root (the common case).
+        if (roots.length === 1) {
+            const root = roots[0];
+            return root && typeof root.querySelectorAll === 'function'
+                ? root.querySelectorAll(value)
+                : [];
+        }
+
+        const found = [];
+        for (const root of roots) {
+            if (root && typeof root.querySelectorAll === 'function') {
+                for (const element of root.querySelectorAll(value)) found.push(element);
+            }
+        }
+        return found;
     }
 
     function classes(value) {
@@ -110,6 +129,10 @@
 
     function unbindRecord(element, record) {
         element.removeEventListener(record.type, record.wrapped, record.options);
+        // AbortSignal listeners must not outlive an unbound event listener.
+        if (record.signal && record.abortHandler) {
+            record.signal.removeEventListener('abort', record.abortHandler);
+        }
         const records = eventMemory.get(element);
         if (!records) return;
         const index = records.indexOf(record);
@@ -125,12 +148,25 @@
             selector = null;
         }
         if (typeof handler !== 'function') throw new TypeError('Event handler must be a function');
+        if (selector == null) selector = null;
+        if (selector != null && typeof selector !== 'string') {
+            throw new TypeError('Delegation selector must be a CSS selector string');
+        }
         const types = splitEvents(events);
+        const signal = options && typeof options === 'object' ? options.signal : null;
+        const removeOnce = once || Boolean(options && typeof options === 'object' && options.once);
+        // Handle `once` ourselves to keep bookkeeping in sync with native listeners.
+        const nativeOptions = options && typeof options === 'object' && options.once
+            ? { ...options, once: false }
+            : options;
+
         return collection.each((i, element) => {
-            if (!element.addEventListener) return;
-            const records = eventMemory.get(element) || [];
+            if (!element.addEventListener || signal?.aborted) return;
             for (const type of types) {
-                const record = { type, selector, handler, options, wrapped: null };
+                const record = {
+                    type, selector, handler, options: nativeOptions,
+                    wrapped: null, signal, abortHandler: null
+                };
                 record.wrapped = function (event) {
                     let context = element;
                     if (selector !== null) {
@@ -142,13 +178,21 @@
                         context = match;
                     }
                     // Remove before invoking, so reentrant triggers still run once.
-                    if (once) unbindRecord(element, record);
+                    if (removeOnce) unbindRecord(element, record);
                     handler.call(context, event);
                 };
-                element.addEventListener(type, record.wrapped, options);
+                element.addEventListener(type, record.wrapped, nativeOptions);
+                const records = eventMemory.get(element) || [];
                 records.push(record);
+                eventMemory.set(element, records);
+
+                // Native AbortSignal removal does not notify our event registry.
+                if (signal) {
+                    record.abortHandler = () => unbindRecord(element, record);
+                    signal.addEventListener('abort', record.abortHandler, { once: true });
+                    if (signal.aborted) unbindRecord(element, record);
+                }
             }
-            eventMemory.set(element, records);
         });
     }
 
@@ -175,7 +219,7 @@
     // For multiple destinations: clone for all but the final destination;
     // move original source nodes into the last. Preserve insertion order.
     function insertNodes(destinations, source, position) {
-        const targets = destinations.filter(target =>
+        const targets = Array.from(destinations).filter(target =>
             (position === 'before' || position === 'after')
                 ? Boolean(target.parentNode && target.before && target.after)
                 : Boolean(target.append && target.prepend)
@@ -194,14 +238,17 @@
         return inserted;
     }
 
-    function matching(element, selector, index) {
+    // Compile once per traversal, not once per element. For a node-list or
+    // Collection selector this avoids materializing the same list N times.
+    function matcher(selector) {
         if (typeof selector === 'function') {
-            return Boolean(selector.call(element, index, element));
+            return (element, index) => Boolean(selector.call(element, index, element));
         }
         if (typeof selector === 'string') {
-            return typeof element.matches === 'function' && element.matches(selector);
+            return element => typeof element.matches === 'function' && element.matches(selector);
         }
-        return nodes(selector).includes(element);
+        const accepted = new Set(nodes(selector));
+        return element => accepted.has(element);
     }
 
     class Collection {
@@ -235,68 +282,64 @@
         end() { return this.previous || new Collection([]); }
 
         find(selector) {
-            return this._push(unique(this.elements.flatMap(element =>
+            return this._push(this.elements.flatMap(element =>
                 typeof element.querySelectorAll === 'function'
                     ? [...element.querySelectorAll(selector)] : []
-            )));
+            ));
         }
 
         parent(selector) {
-            return this._push(unique(this.elements.map(element => element.parentElement)
-                .filter(element => !selector || element.matches(selector))));
+            return this._push(this.elements.map(element => element.parentElement)
+                .filter(element => !selector || element?.matches(selector)));
         }
 
         children(selector) {
-            return this._push(unique(this.elements.flatMap(element =>
+            return this._push(this.elements.flatMap(element =>
                 element.children ? [...element.children] : []
-            ).filter(element => !selector || element.matches(selector))));
+            ).filter(element => !selector || element.matches(selector)));
         }
 
         closest(selector) {
-            return this._push(unique(this.elements.map(element =>
+            return this._push(this.elements.map(element =>
                 typeof element.closest === 'function' ? element.closest(selector) : null
-            )));
+            ));
         }
 
         filter(selector) {
-            return this._push(this.elements.filter((element, index) =>
-                matching(element, selector, index)
-            ));
+            return this._push(this.elements.filter(matcher(selector)));
         }
 
         not(selector) {
-            return this._push(this.elements.filter((element, index) =>
-                !matching(element, selector, index)
-            ));
+            const matches = matcher(selector);
+            return this._push(this.elements.filter((element, index) => !matches(element, index)));
         }
 
         is(selector) {
-            return this.elements.some((element, index) => matching(element, selector, index));
+            return this.elements.some(matcher(selector));
         }
 
         add(selector, context) {
-            return this._push(unique([...this.elements, ...select(selector, context)]));
+            return this._push([...this.elements, ...select(selector, context)]);
         }
 
         siblings(selector) {
-            return this._push(unique(this.elements.flatMap(element =>
+            const matches = selector === undefined ? null : matcher(selector);
+            return this._push(this.elements.flatMap(element =>
                 element.parentElement ? [...element.parentElement.children]
                     .filter(sibling => sibling !== element) : []
-            ).filter((element, index) => selector === undefined || matching(element, selector, index))));
+            ).filter((element, index) => !matches || matches(element, index)));
         }
 
         next(selector) {
-            return this._push(unique(this.elements.map(element => element.nextElementSibling)
-                .filter(Boolean).filter((element, index) =>
-                    selector === undefined || matching(element, selector, index)
-                )));
+            const matches = selector === undefined ? null : matcher(selector);
+            return this._push(this.elements.map(element => element.nextElementSibling)
+                .filter(Boolean).filter((element, index) => !matches || matches(element, index)));
         }
 
         prev(selector) {
-            return this._push(unique(this.elements.map(element => element.previousElementSibling)
-                .filter(Boolean).filter((element, index) =>
-                    selector === undefined || matching(element, selector, index)
-                )));
+            const matches = selector === undefined ? null : matcher(selector);
+            return this._push(this.elements.map(element => element.previousElementSibling)
+                .filter(Boolean).filter((element, index) => !matches || matches(element, index)));
         }
 
         addClass(names) {
