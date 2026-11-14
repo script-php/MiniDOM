@@ -6,7 +6,7 @@
 
 *Select. Traverse. Manipulate. Listen. Chain.*
 
-[Getting started](#getting-started) · [Examples](#practical-examples) · [API reference](#complete-api-reference) · [Security](#security) · [Testing](#testing)
+[Getting started](#getting-started) · [Examples](#practical-examples) · [API reference](#complete-api-reference)
 
 </div>
 
