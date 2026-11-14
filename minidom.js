@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.37 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.38 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.37';
+    const VERSION = '0.0.38';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1113,8 +1113,11 @@
                 // Convert before destroying managed state: user-defined toString()
                 // can throw, in which case the existing subtree must survive.
                 const prepared = next == null ? '' : String(next);
-                cleanChildren(element);
-                element.textContent = prepared;
+                // Template descendants live in .content, not childNodes.
+                const target = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                    ? element.content : element;
+                cleanChildren(target);
+                target.textContent = prepared;
             });
         }
 
@@ -1148,8 +1151,10 @@
                         }
                     }
                     // Parsing must succeed before destroying the old subtree.
-                    cleanChildren(element);
-                    element.replaceChildren(fragment);
+                    const target = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                        ? element.content : element;
+                    cleanChildren(target);
+                    target.replaceChildren(fragment);
                 }
             });
         }
