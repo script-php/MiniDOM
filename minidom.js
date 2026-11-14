@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.109 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.110 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.109';
+    const VERSION = '0.0.110';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2114,13 +2114,17 @@
             // structure while cleaning managed state from removed children.
             const eligible = this.elements.filter(element =>
                 isNode(element) && element.nodeType !== 9 && element.replaceChildren);
-            const selected = new Set(eligible);
+            // Template content is a DocumentFragment without a parentNode
+            // link to its host. Index selected template contents once rather
+            // than scanning the entire selection for every ancestor fragment.
+            const selectedTemplateContents = new Set(eligible
+                .filter(element => element.nodeType === 1 &&
+                    element.localName === 'template' &&
+                    element.namespaceURI === 'http://www.w3.org/1999/xhtml')
+                .map(element => element.content));
             const roots = topLevelNodes(eligible).filter(element => {
-                // HTML template contents live in a DocumentFragment, whose
-                // parentNode is null. Treat its host as an ancestor as well.
                 for (let parent = element.parentNode; parent; parent = parent.parentNode) {
-                    if (parent.nodeType === 11 && [...selected].some(candidate =>
-                        candidate.localName === 'template' && candidate.content === parent)) return false;
+                    if (selectedTemplateContents.has(parent)) return false;
                 }
                 return true;
             });
