@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.13 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.14 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.13';
+    const VERSION = '0.0.14';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -62,6 +62,12 @@
             const created = [...template.content.childNodes];
             for (const node of created) template.content.removeChild(node);
             return created;
+        }
+
+        const extension = /^(.*?)(:visible|:hidden|:input|:contains\((?:[^()]|\([^()]*\))*\))$/s.exec(trimmed);
+        if (extension) {
+            const base = extension[1].trim() || '*';
+            return Array.from(select(base, context)).filter(element => selectorMatch(element, extension[2]));
         }
 
         // A context can itself be a CSS selector, node, or MiniDOM collection.
@@ -229,6 +235,7 @@
         const nativeOptions = options && typeof options === 'object'
             ? { ...options, once: false } : options;
         const capture = typeof nativeOptions === 'boolean' ? nativeOptions : Boolean(nativeOptions?.capture);
+        const eventData = options && typeof options === 'object' ? options.data : undefined;
 
         return collection.each((i, element) => {
             if (!element.addEventListener || signal?.aborted) return;
@@ -239,11 +246,12 @@
                 if (records.some(record =>
                     record.type === token.type && record.handler === handler &&
                     record.selector === selector && record.capture === capture &&
-                    record.namespaces.join('.') === token.namespaces.join('.'))) continue;
+                    record.namespaces.join('.') === token.namespaces.join('.') &&
+                    record.eventData === eventData)) continue;
                 const record = {
                     type: token.type, namespaces: token.namespaces, selector, handler,
                     options: nativeOptions, capture, once: removeOnce,
-                    wrapped: null, signal, abortHandler: null
+                    wrapped: null, signal, abortHandler: null, eventData
                 };
                 record.wrapped = function (event) {
                     let context = element;
@@ -255,9 +263,14 @@
                         context = match;
                     }
                     if (removeOnce) unbindRecord(element, record);
+                    if (eventData !== undefined) event.data = eventData;
                     handler.call(context, event);
                 };
-                element.addEventListener(token.type, record.wrapped, nativeOptions);
+                const listenerOptions = selector !== null && (token.type === 'focus' || token.type === 'blur')
+                    ? { ...(typeof nativeOptions === 'object' ? nativeOptions : {}), capture: true }
+                    : nativeOptions;
+                record.options = listenerOptions;
+                element.addEventListener(token.type, record.wrapped, listenerOptions);
                 records.push(record);
                 eventMemory.set(element, records);
                 if (signal) {
@@ -459,7 +472,9 @@
         }
         for (const record of eventMemory.get(source) || []) {
             bindEvents(new Collection([destination]), [record.type, ...record.namespaces].join('.'), record.selector,
-                record.handler, record.options, record.once);
+                record.handler, record.eventData === undefined ? record.options :
+                    { ...(typeof record.options === 'object' ? record.options : { capture: record.capture }),
+                        data: record.eventData }, record.once);
         }
     }
 
@@ -531,12 +546,27 @@
 
     // Compile once per traversal, not once per element. For a node-list or
     // Collection selector this avoids materializing the same list N times.
+    function selectorMatch(element, selector) {
+        if (typeof selector !== 'string') return false;
+        if (selector === ':input') return element.matches?.('input,select,textarea,button') || false;
+        if (selector === ':visible') return new Collection([element]).isVisible();
+        if (selector === ':hidden') return !new Collection([element]).isVisible();
+        const content = /^:contains\((.*)\)$/s.exec(selector.trim());
+        if (content) {
+            let value = content[1].trim();
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+            return (element.textContent || '').includes(value);
+        }
+        return typeof element.matches === 'function' && element.matches(selector);
+    }
+
     function matcher(selector) {
         if (typeof selector === 'function') {
             return (element, index) => Boolean(selector.call(element, index, element));
         }
         if (typeof selector === 'string') {
-            return element => typeof element.matches === 'function' && element.matches(selector);
+            return element => selectorMatch(element, selector);
         }
         const accepted = new Set(nodes(selector));
         return element => accepted.has(element);
@@ -627,6 +657,56 @@
             }
             return this._push(found);
         }
+
+        parents(selector) { return this._walk('parentElement', selector); }
+        parentsUntil(until, selector) { return this._walk('parentElement', selector, until); }
+        nextAll(selector) { return this._walk('nextElementSibling', selector); }
+        prevAll(selector) { return this._walk('previousElementSibling', selector); }
+        nextUntil(until, selector) { return this._walk('nextElementSibling', selector, until); }
+        prevUntil(until, selector) { return this._walk('previousElementSibling', selector, until); }
+        _walk(direction, selector, until) {
+            const accepts = selector === undefined ? () => true : matcher(selector);
+            const stops = until === undefined ? () => false : matcher(until);
+            const found = [];
+            for (const element of this.elements) {
+                let node = element[direction];
+                while (node && node.nodeType === 1) {
+                    if (stops(node)) break;
+                    if (accepts(node)) found.push(node);
+                    node = node[direction];
+                }
+            }
+            return this._push(found);
+        }
+        contents() {
+            const found = [];
+            for (const element of this.elements) {
+                if (element.contentDocument) found.push(element.contentDocument);
+                else if (element.tagName === 'TEMPLATE') found.push(...element.content.childNodes);
+                else if (element.childNodes) found.push(...element.childNodes);
+            }
+            return this._push(found);
+        }
+        addBack(selector) {
+            if (!this.previous) return this._push(this.elements);
+            const previous = selector === undefined ? this.previous.elements :
+                this.previous.elements.filter(matcher(selector));
+            return this._push([...this.elements, ...previous]);
+        }
+        map(callback) {
+            if (typeof callback !== 'function') throw new TypeError('map() requires callback');
+            const found = [];
+            this.each((i, element) => {
+                const value = callback.call(element, i, element);
+                if (value == null) return;
+                if (value instanceof Collection) found.push(...value.elements);
+                else if (Array.isArray(value)) found.push(...value);
+                else found.push(value);
+            });
+            return this._push(found);
+        }
+        even() { return this._push(this.elements.filter((_, i) => i % 2 === 0)); }
+        odd() { return this._push(this.elements.filter((_, i) => i % 2 === 1)); }
 
         filter(selector) {
             return this._push(this.elements.filter(matcher(selector)));
@@ -927,13 +1007,39 @@
                 } else element.style.setProperty(axis, target);
             });
         }
-        innerWidth() { return dimensionOf(this.get(), 'width', 'inner'); }
-        innerHeight() { return dimensionOf(this.get(), 'height', 'inner'); }
-        outerWidth(includeMargin = false) {
-            return dimensionOf(this.get(), 'width', 'outer', Boolean(includeMargin));
+        innerWidth(value) { return this._boxDimension('width', 'inner', value); }
+        innerHeight(value) { return this._boxDimension('height', 'inner', value); }
+        outerWidth(value, includeMargin = false) {
+            if (typeof value === 'boolean' || value === undefined)
+                return dimensionOf(this.get(), 'width', 'outer', Boolean(value));
+            return this._boxDimension('width', 'outer', value, includeMargin);
         }
-        outerHeight(includeMargin = false) {
-            return dimensionOf(this.get(), 'height', 'outer', Boolean(includeMargin));
+        outerHeight(value, includeMargin = false) {
+            if (typeof value === 'boolean' || value === undefined)
+                return dimensionOf(this.get(), 'height', 'outer', Boolean(value));
+            return this._boxDimension('height', 'outer', value, includeMargin);
+        }
+        _boxDimension(axis, box, value, includeMargin = false) {
+            if (value === undefined) return dimensionOf(this.get(), axis, box, includeMargin);
+            return this.each((i, element) => {
+                if (!element.style) return;
+                const current = dimensionOf(element, axis, box, includeMargin);
+                const next = typeof value === 'function' ? value.call(element, i, current) : value;
+                if (next == null) { element.style.removeProperty(axis); return; }
+                if (typeof next !== 'number' || !Number.isFinite(next))
+                    throw new TypeError('Box dimension setter requires a finite number');
+                const style = global.getComputedStyle(element);
+                const horizontal = axis === 'width';
+                const padding = (parseFloat(style[horizontal ? 'paddingLeft' : 'paddingTop']) || 0) +
+                    (parseFloat(style[horizontal ? 'paddingRight' : 'paddingBottom']) || 0);
+                const border = (parseFloat(style[horizontal ? 'borderLeftWidth' : 'borderTopWidth']) || 0) +
+                    (parseFloat(style[horizontal ? 'borderRightWidth' : 'borderBottomWidth']) || 0);
+                const margin = includeMargin ?
+                    (parseFloat(style[horizontal ? 'marginLeft' : 'marginTop']) || 0) +
+                    (parseFloat(style[horizontal ? 'marginRight' : 'marginBottom']) || 0) : 0;
+                const contentSize = Math.max(0, next - padding - (box === 'outer' ? border + margin : 0));
+                new Collection([element])._dimension(axis, contentSize);
+            });
         }
 
         // Scroll getters return a number. Setters apply to every matched node
@@ -1179,6 +1285,27 @@
             });
         }
 
+        // Invoke MiniDOM handlers on the first selected node without bubbling.
+        // Unlike jQuery, this returns the last callback result (if any).
+        triggerHandler(eventName, detail) {
+            const element = this.get();
+            if (!element) return undefined;
+            const token = eventTokens(eventName)[0];
+            if (!token || !token.type) throw new TypeError('Event type required');
+            let result;
+            const event = new global.CustomEvent(token.type, { detail, cancelable: true });
+            for (const record of [...(eventMemory.get(element) || [])]) {
+                if (!matchesToken(record, token) || record.selector !== null) continue;
+                if (record.once) unbindRecord(element, record);
+                result = record.handler.call(element, event);
+                if (result === false) event.preventDefault();
+            }
+            return result;
+        }
+        hover(enter, leave = enter) {
+            return this.on('mouseenter', enter).on('mouseleave', leave);
+        }
+
         // Dispatch native bubbling events. Namespaces on trigger() are
         // deliberately not supported: use the base event type.
         trigger(events, detail) {
@@ -1285,6 +1412,48 @@
 
         prependTo(target) {
             return this._push(insertNodes(select(target), this.elements, 'prepend'));
+        }
+
+        insertBefore(target) { return this._push(insertNodes(select(target), this.elements, 'before')); }
+        insertAfter(target) { return this._push(insertNodes(select(target), this.elements, 'after')); }
+        replaceAll(target) {
+            const targets = [...select(target)].filter(node => node.parentNode);
+            const inserted = [];
+            targets.forEach((node, i) => {
+                const copies = i === targets.length - 1 ? this.elements :
+                    this.elements.map(source => cloneNodeWithState(source, true));
+                node.replaceWith(...copies);
+                cleanTree(node);
+                inserted.push(...copies);
+            });
+            return this._push(inserted);
+        }
+        wrapAll(content) {
+            const elements = this.elements.filter(element => element.parentNode && element.nodeType === 1);
+            const template = contentNodes(content).find(node => node.nodeType === 1);
+            if (!elements.length || !template) return this;
+            const wrapper = cloneNodeWithState(template, true);
+            elements[0].before(wrapper);
+            let deepest = wrapper;
+            while (deepest.firstElementChild) deepest = deepest.firstElementChild;
+            deepest.append(...elements);
+            return this;
+        }
+        wrapInner(content) {
+            const template = contentNodes(content).find(node => node.nodeType === 1);
+            if (!template) return this;
+            return this.each((i, element) => {
+                const wrapper = cloneNodeWithState(template, true);
+                let deepest = wrapper;
+                while (deepest.firstElementChild) deepest = deepest.firstElementChild;
+                deepest.append(...[...element.childNodes]);
+                element.append(wrapper);
+            });
+        }
+        removeProp(name) {
+            return this.each((i, element) => {
+                try { delete element[name]; } catch (_) { /* native nonconfigurable property */ }
+            });
         }
 
         // .clone() copies DOM only; .clone(true) copies managed events/data
