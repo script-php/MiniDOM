@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.34 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.35 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.34';
+    const VERSION = '0.0.35';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1110,8 +1110,11 @@
             if (value === undefined) return this.get()?.textContent;
             return this.each((i, element) => {
                 const next = typeof value === 'function' ? value.call(element, i, element.textContent) : value;
+                // Convert before destroying managed state: user-defined toString()
+                // can throw, in which case the existing subtree must survive.
+                const prepared = next == null ? '' : String(next);
                 cleanChildren(element);
-                element.textContent = next == null ? '' : String(next);
+                element.textContent = prepared;
             });
         }
 
@@ -1120,9 +1123,15 @@
             return this.each((i, element) => {
                 if ('innerHTML' in element) {
                     const next = typeof value === 'function' ? value.call(element, i, element.innerHTML) : value;
+                    // Parse into a detached template before cleaning existing
+                    // children. Invalid markup conversions or Trusted Types
+                    // rejection must not destroy their managed state.
+                    const prepared = next == null ? '' : String(next);
+                    const template = element.ownerDocument.createElement('template');
+                    template.innerHTML = prepared;
                     cleanChildren(element);
                     // As with .append(), only pass trusted markup here.
-                    element.innerHTML = next == null ? '' : String(next);
+                    element.innerHTML = prepared;
                 }
             });
         }
