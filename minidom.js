@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.63 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.65 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.63';
+    const VERSION = '0.0.65';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1921,13 +1921,17 @@
         insertBefore(target) { return this._push(insertNodes(select(target), this.elements, 'before')); }
         insertAfter(target) { return this._push(insertNodes(select(target), this.elements, 'after')); }
         replaceAll(target) {
+            // A source selection may contain an ancestor and its descendants.
+            // Moving both independently would flatten the source subtree.
+            const sources = this.elements.filter(source => !this.elements.some(other =>
+                other !== source && isNode(other) && other.contains?.(source)));
             const targets = [...select(target)].filter(node => node.parentNode &&
-                !this.elements.some(source => source === node ||
+                !sources.some(source => source === node ||
                     (source.contains && source.contains(node))));
             const inserted = [];
             targets.forEach((node, i) => {
-                const copies = i === targets.length - 1 ? this.elements :
-                    this.elements.map(source => cloneNodeWithState(source, true));
+                const copies = i === targets.length - 1 ? sources :
+                    sources.map(source => cloneNodeWithState(source, true));
                 // Use a fragment: spreading tens of thousands of nodes as
                 // function arguments can throw RangeError in browsers.
                 const fragment = node.ownerDocument.createDocumentFragment();
