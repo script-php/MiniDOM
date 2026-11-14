@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.65 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.66 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.65';
+    const VERSION = '0.0.66';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2025,7 +2025,11 @@
 
         replaceWith(...content) {
             const targets = this.elements.filter(element => element.parentNode && isNode(element));
-            const source = content.flatMap(contentNodes);
+            const flattened = content.flatMap(contentNodes);
+            // Moving a selected parent already moves its descendants. Inserting
+            // both would detach the descendants and flatten the source tree.
+            const source = flattened.filter(node => !flattened.some(other =>
+                other !== node && isNode(other) && other.contains?.(node)));
             const validTargets = targets.filter(element => !source.some(node =>
                 node === element || (node.contains && node.contains(element))));
             validTargets.forEach((element, index) => {
