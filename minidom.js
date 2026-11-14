@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.48 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.55 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.48';
+    const VERSION = '0.0.55';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1132,9 +1132,15 @@
         }
 
         removeClass(names) {
-            const tokens = classes(names);
+            // Match addClass/toggleClass callback semantics, including the
+            // element index and its class string before modification.
+            const fixedTokens = typeof names === 'function' ? null : classes(names);
             return this.each((i, element) => {
-                if (element.classList && tokens.length) updateClassTokens(element.classList, tokens, 'remove');
+                if (!element.classList) return;
+                const next = typeof names === 'function'
+                    ? names.call(element, i, element.className) : null;
+                const tokens = fixedTokens || classes(next);
+                if (tokens.length) updateClassTokens(element.classList, tokens, 'remove');
             });
         }
 
@@ -1203,9 +1209,22 @@
                     // contextual parsing is necessary to preserve namespaces.
                     let fragment;
                     if (element.namespaceURI === 'http://www.w3.org/1999/xhtml') {
-                        const template = element.ownerDocument.createElement('template');
-                        template.innerHTML = prepared;
-                        fragment = template.content;
+                        // Some HTML elements have context-sensitive parsing rules:
+                        // table rows need implicit tbody, and raw-text/RCDATA
+                        // elements must not interpret markup as child elements.
+                        // Parse in a detached element of the same type, keeping
+                        // scripts inert and preserving TrustedHTML under CSP.
+                        const contextual = /^(?:table|thead|tbody|tfoot|tr|colgroup|select|optgroup|textarea|title|style|script)$/i.test(element.localName);
+                        if (contextual) {
+                            const parser = element.cloneNode(false);
+                            parser.innerHTML = prepared;
+                            fragment = element.ownerDocument.createDocumentFragment();
+                            while (parser.firstChild) fragment.appendChild(parser.firstChild);
+                        } else {
+                            const template = element.ownerDocument.createElement('template');
+                            template.innerHTML = prepared;
+                            fragment = template.content;
+                        }
                     } else {
                         const range = element.ownerDocument.createRange();
                         range.selectNodeContents(element);
@@ -1274,6 +1293,7 @@
         attr(name, value) {
             if (name && typeof name === 'object') {
                 return this.each((i, element) => {
+                    if (!element.setAttribute || !element.getAttribute) return;
                     for (const [key, val] of Object.entries(name)) {
                         const next = typeof val === 'function' ? val.call(element, i, element.getAttribute(key)) : val;
                         if (next === null) element.removeAttribute(key);
@@ -1300,7 +1320,7 @@
         css(property, value) {
             if (Array.isArray(property)) {
                 const element = this.get();
-                if (!element) return undefined;
+                if (!element || element.nodeType !== 1) return undefined;
                 const style = global.getComputedStyle(element), result = {};
                 for (const name of property) result[name] = style.getPropertyValue(cssName(name));
                 return result;
