@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.113 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.114 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.113';
+    const VERSION = '0.0.114';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -358,7 +358,9 @@
     }
 
     function readData(element, key) {
-        if (!element) return undefined;
+        // WeakMap keys must be objects. Public collections can be assembled
+        // manually and may contain primitives.
+        if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return undefined;
         const cache = cachedData(element);
         const normalized = dataKey(key);
         if (Object.hasOwn(cache, normalized)) return cache[normalized];
@@ -1963,7 +1965,7 @@
         data(key, value) {
             if (key === undefined) {
                 const element = this.get();
-                if (!element) return undefined;
+                if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return undefined;
                 const result = Object.create(null);
                 for (const attr of element.attributes || []) {
                     if (attr.name.startsWith('data-')) {
