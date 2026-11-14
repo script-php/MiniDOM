@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.127 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.128 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.127';
+    const VERSION = '0.0.128';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -375,10 +375,14 @@
     }
 
     function unbindRecord(element, record) {
-        element.removeEventListener(record.type, record.wrapped, record.options);
-        // AbortSignal listeners must not outlive an unbound event listener.
+        // Custom EventTargets and patched native methods can throw while
+        // removing a listener. Never retain our bookkeeping or abort hook
+        // because a foreign implementation failed during teardown.
+        try { element.removeEventListener(record.type, record.wrapped, record.options); }
+        catch (_) { /* best-effort native teardown */ }
         if (record.signal && record.abortHandler) {
-            record.signal.removeEventListener('abort', record.abortHandler);
+            try { record.signal.removeEventListener('abort', record.abortHandler); }
+            catch (_) { /* best-effort abort-hook teardown */ }
         }
         const records = eventMemory.get(element);
         if (!records) return;
