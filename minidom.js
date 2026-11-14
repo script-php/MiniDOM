@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.106 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.107 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.106';
+    const VERSION = '0.0.107';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2152,7 +2152,9 @@
                 const copies = index === validTargets.length - 1
                     ? source
                     : source.map(node => cloneNodeWithState(node, true));
-                const fragment = global.document.createDocumentFragment();
+                // Build replacement nodes in the receiving document, not the
+                // global document (which may differ for iframe/foreign targets).
+                const fragment = element.ownerDocument.createDocumentFragment();
                 for (const copy of copies) fragment.appendChild(copy);
                 element.parentNode.replaceChild(fragment, element);
                 // Any children moved out of the old element remain live.
