@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.114 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.115 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.114';
+    const VERSION = '0.0.115';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -361,13 +361,17 @@
         // WeakMap keys must be objects. Public collections can be assembled
         // manually and may contain primitives.
         if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return undefined;
-        const cache = cachedData(element);
+        // A read miss must not allocate a cache entry. This matters for
+        // large read-only traversals and for arbitrary object-backed data.
         const normalized = dataKey(key);
-        if (Object.hasOwn(cache, normalized)) return cache[normalized];
-        if (!element.getAttribute) return undefined;
+        const cache = dataMemory.get(element);
+        if (cache && Object.hasOwn(cache, normalized)) return cache[normalized];
+        if (typeof element.getAttribute !== 'function') return undefined;
         const attr = element.getAttribute(dataAttr(normalized));
         if (attr === null) return undefined;
-        return (cache[normalized] = parseData(attr));
+        const parsed = parseData(attr);
+        cachedData(element)[normalized] = parsed;
+        return parsed;
     }
 
     function unbindRecord(element, record) {
