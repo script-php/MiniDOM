@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.105 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.106 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.105';
+    const VERSION = '0.0.106';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -863,9 +863,14 @@
                 ? source
                 : source.map(node => cloneNodeWithState(node, true));
             if (!copies.length) return;
-            const fragment = global.document.createDocumentFragment();
+            // Build the fragment in the destination document. Native adoption
+            // still handles foreign source nodes, but the insertion container
+            // must belong to the receiving DOM (including iframe documents).
+            const destination = insertionTarget(target);
+            const owner = destination.nodeType === 9 ? destination : destination.ownerDocument;
+            const fragment = owner.createDocumentFragment();
             for (const copy of copies) fragment.appendChild(copy);
-            insertionTarget(target)[position](fragment);
+            destination[position](fragment);
             for (const copy of copies) inserted.push(copy);
         });
         return inserted;
