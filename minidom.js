@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.104 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.105 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.104';
+    const VERSION = '0.0.105';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1973,53 +1973,31 @@
 
         // Manipulation methods mutate the current selection and return it.
         // HTML strings are parsed by the browser: never pass untrusted HTML.
-        append(...content) {
+        // Functional insertion callbacks run once per distinct destination.
+        // Keep the first original collection index for callback compatibility.
+        _insertContent(content, position) {
             if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => {
-                    if (!isNode(el)) return;
-                    new Collection([el]).append(...content.map(item =>
-                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
+                const seen = new Set();
+                this.elements.forEach((el, i) => {
+                    if (!isNode(el) || seen.has(el)) return;
+                    seen.add(el);
+                    // A sibling insertion requires an attached parent. Do not
+                    // execute callbacks for destinations that cannot be used.
+                    if ((position === 'before' || position === 'after') && !el.parentNode) return;
+                    const values = content.map(item => typeof item === 'function'
+                        ? item.call(el, i, el.innerHTML) : item);
+                    insertNodes([el], values.flatMap(contentNodes), position);
                 });
+            } else {
+                insertNodes(this.elements, content.flatMap(contentNodes), position);
             }
-            insertNodes(this.elements, content.flatMap(contentNodes), 'append');
             return this;
         }
 
-        prepend(...content) {
-            if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => {
-                    if (!isNode(el)) return;
-                    new Collection([el]).prepend(...content.map(item =>
-                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
-                });
-            }
-            insertNodes(this.elements, content.flatMap(contentNodes), 'prepend');
-            return this;
-        }
-
-        before(...content) {
-            if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => {
-                    if (!isNode(el)) return;
-                    new Collection([el]).before(...content.map(item =>
-                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
-                });
-            }
-            insertNodes(this.elements, content.flatMap(contentNodes), 'before');
-            return this;
-        }
-
-        after(...content) {
-            if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => {
-                    if (!isNode(el)) return;
-                    new Collection([el]).after(...content.map(item =>
-                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
-                });
-            }
-            insertNodes(this.elements, content.flatMap(contentNodes), 'after');
-            return this;
-        }
+        append(...content) { return this._insertContent(content, 'append'); }
+        prepend(...content) { return this._insertContent(content, 'prepend'); }
+        before(...content) { return this._insertContent(content, 'before'); }
+        after(...content) { return this._insertContent(content, 'after'); }
 
         // These return the inserted selection (which may include clones),
         // so .end() returns to the original source selection.
