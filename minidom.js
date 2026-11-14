@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.118 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.119 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.118';
+    const VERSION = '0.0.119';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1319,7 +1319,11 @@
             const roots = this._replacementRoots();
             return this.each((i, element) => {
                 if (!roots.has(element)) return;
-                if ('innerHTML' in element) {
+                // Collections may contain window, document, text nodes, or
+                // caller-supplied non-DOM entries. Only HTML-capable nodes
+                // should reach the parser or the functional setter callback.
+                if (element != null && (typeof element === 'object' || typeof element === 'function') &&
+                    'innerHTML' in element && isNode(element)) {
                     const next = typeof value === 'function' ? value.call(element, i, element.innerHTML) : value;
                     // Parse into a detached template before cleaning existing
                     // children. Invalid markup conversions or Trusted Types
