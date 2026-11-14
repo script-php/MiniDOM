@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.90 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.91 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.90';
+    const VERSION = '0.0.91';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1860,6 +1860,7 @@
         prop(name, value) {
             if (name && typeof name === 'object') {
                 return this.each((i, element) => {
+                    if (element == null) return;
                     for (const [key, val] of Object.entries(name)) {
                         if (key === '__proto__' || key === 'prototype' || key === 'constructor') continue;
                         element[key] = typeof val === 'function' ? val.call(element, i, element[key]) : val;
@@ -1869,6 +1870,7 @@
             if (value === undefined) return this.get()?.[name];
             if (name === '__proto__' || name === 'prototype' || name === 'constructor') return this;
             return this.each((i, element) => {
+                if (element == null) return;
                 element[name] = typeof value === 'function' ? value.call(element, i, element[name]) : value;
             });
         }
@@ -2022,7 +2024,11 @@
             });
         }
         removeProp(name) {
+            // Match prop()'s prototype-key protection and tolerate sparse or
+            // mixed collections, including null and undefined entries.
+            if (name === '__proto__' || name === 'constructor' || name === 'prototype') return this;
             return this.each((i, element) => {
+                if (element == null) return;
                 try { delete element[name]; } catch (_) { /* native nonconfigurable property */ }
             });
         }
