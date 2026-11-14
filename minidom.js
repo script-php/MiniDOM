@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.121 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.122 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.121';
+    const VERSION = '0.0.122';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -823,9 +823,20 @@
     // This avoids quadratic pairwise comparisons for large sibling selections.
     function topLevelNodes(items) {
         const selected = new Set(items);
+        // A template's .content fragment has no parentNode pointing back to
+        // its host. Treat selected templates as ancestors of their content
+        // nodes so a source selection cannot accidentally extract both.
+        const templateHosts = new Map();
+        for (const node of selected) {
+            if (node?.nodeType === 1 && node.localName === 'template' &&
+                node.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+                templateHosts.set(node.content, node);
+            }
+        }
         return unique(items).filter(node => {
-            for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+            for (let parent = node.parentNode; parent;) {
                 if (selected.has(parent)) return false;
+                parent = parent.parentNode || templateHosts.get(parent) || null;
             }
             return true;
         });
