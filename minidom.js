@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.36 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.37 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.36';
+    const VERSION = '0.0.37';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1126,13 +1126,30 @@
                     // Parse into a detached template before cleaning existing
                     // children. Invalid markup conversions or Trusted Types
                     // rejection must not destroy their managed state.
-                    const prepared = next == null ? '' : String(next);
-                    const template = element.ownerDocument.createElement('template');
-                    template.innerHTML = prepared;
-                    // Parse only once. A second innerHTML assignment could throw
-                    // after cleanup, and would repeat expensive HTML parsing.
+                    // Preserve native TrustedHTML objects rather than coercing
+                    // them to strings (which would lose their Trusted Types brand).
+                    const prepared = next == null ? '' :
+                        (global.TrustedHTML && next instanceof global.TrustedHTML ? next : String(next));
+                    // HTML templates keep inserted scripts inert. For SVG/MathML,
+                    // contextual parsing is necessary to preserve namespaces.
+                    let fragment;
+                    if (element.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+                        const template = element.ownerDocument.createElement('template');
+                        template.innerHTML = prepared;
+                        fragment = template.content;
+                    } else {
+                        const range = element.ownerDocument.createRange();
+                        range.selectNodeContents(element);
+                        fragment = range.createContextualFragment(prepared);
+                        // Match the HTML-template path: never execute scripts
+                        // supplied via .html(), including inside SVG/MathML.
+                        for (const script of fragment.querySelectorAll('script')) {
+                            script.remove();
+                        }
+                    }
+                    // Parsing must succeed before destroying the old subtree.
                     cleanChildren(element);
-                    element.replaceChildren(template.content);
+                    element.replaceChildren(fragment);
                 }
             });
         }
