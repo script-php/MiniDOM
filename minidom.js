@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.103 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.104 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.103';
+    const VERSION = '0.0.104';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -828,9 +828,9 @@
         // source against every other source (quadratic for large sibling lists).
         source = topLevelNodes(source);
         const targets = unique(Array.from(destinations)).filter(target =>
-            (position === 'before' || position === 'after')
+            isNode(target) && ((position === 'before' || position === 'after')
                 ? Boolean(target.parentNode && target.before && target.after)
-                : Boolean(target.append && target.prepend)
+                : Boolean(target.append && target.prepend))
         );
         const inserted = [];
         // A node cannot be inserted into itself or one of its descendants.
@@ -1975,8 +1975,11 @@
         // HTML strings are parsed by the browser: never pass untrusted HTML.
         append(...content) {
             if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => new Collection([el]).append(...content.map(item =>
-                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+                return this.each((i, el) => {
+                    if (!isNode(el)) return;
+                    new Collection([el]).append(...content.map(item =>
+                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
+                });
             }
             insertNodes(this.elements, content.flatMap(contentNodes), 'append');
             return this;
@@ -1984,8 +1987,11 @@
 
         prepend(...content) {
             if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => new Collection([el]).prepend(...content.map(item =>
-                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+                return this.each((i, el) => {
+                    if (!isNode(el)) return;
+                    new Collection([el]).prepend(...content.map(item =>
+                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
+                });
             }
             insertNodes(this.elements, content.flatMap(contentNodes), 'prepend');
             return this;
@@ -1993,8 +1999,11 @@
 
         before(...content) {
             if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => new Collection([el]).before(...content.map(item =>
-                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+                return this.each((i, el) => {
+                    if (!isNode(el)) return;
+                    new Collection([el]).before(...content.map(item =>
+                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
+                });
             }
             insertNodes(this.elements, content.flatMap(contentNodes), 'before');
             return this;
@@ -2002,8 +2011,11 @@
 
         after(...content) {
             if (content.some(item => typeof item === 'function')) {
-                return this.each((i, el) => new Collection([el]).after(...content.map(item =>
-                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+                return this.each((i, el) => {
+                    if (!isNode(el)) return;
+                    new Collection([el]).after(...content.map(item =>
+                        typeof item === 'function' ? item.call(el, i, el.innerHTML) : item));
+                });
             }
             insertNodes(this.elements, content.flatMap(contentNodes), 'after');
             return this;
