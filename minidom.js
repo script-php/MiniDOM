@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.129 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.130 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.129';
+    const VERSION = '0.0.130';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -850,10 +850,31 @@
         // its host. Treat selected templates as ancestors of their content
         // nodes so a source selection cannot accidentally extract both.
         const templateHosts = new Map();
+        // Map nested template fragments too. A selected node can live inside
+        // several inert template.content boundaries, none of which expose a
+        // parentNode link back to their owning <template> element.
+        const pending = [];
         for (const node of selected) {
             if (node?.nodeType === 1 && node.localName === 'template' &&
-                node.namespaceURI === 'http://www.w3.org/1999/xhtml') {
-                templateHosts.set(node.content, node);
+                node.namespaceURI === 'http://www.w3.org/1999/xhtml') pending.push(node);
+        }
+        const visited = new Set();
+        while (pending.length) {
+            const template = pending.pop();
+            if (visited.has(template)) continue;
+            visited.add(template);
+            templateHosts.set(template.content, template);
+            // Only traverse inert content of selected template roots. Ordinary
+            // DOM descendants already have parentNode ancestry.
+            const stack = [...template.content.childNodes];
+            while (stack.length) {
+                const child = stack.pop();
+                if (child.nodeType === 1 && child.localName === 'template' &&
+                    child.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+                    if (!visited.has(child)) pending.push(child);
+                } else if (child.childNodes?.length) {
+                    for (const nested of child.childNodes) stack.push(nested);
+                }
             }
         }
         return unique(items).filter(node => {
