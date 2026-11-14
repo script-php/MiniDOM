@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.89 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.90 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.89';
+    const VERSION = '0.0.90';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2114,9 +2114,13 @@
         // Remove each distinct direct parent, keeping its children and their
         // managed event/data state. Never unwrap <html> or <body>.
         unwrap() {
-            const parents = unique(this.elements.map(element => element.parentElement))
+            // Guard structural roots in their own document, not only the
+            // document that loaded MiniDOM. Collections can contain nodes
+            // from DOMParser, iframes, or document.implementation documents.
+            const parents = unique(this.elements.map(element => element?.parentElement))
                 .filter(parent => parent && parent.parentNode &&
-                    parent !== global.document.body && parent !== global.document.documentElement);
+                    parent !== parent.ownerDocument.body &&
+                    parent !== parent.ownerDocument.documentElement);
             for (const parent of parents) {
                 const fragment = parent.ownerDocument.createDocumentFragment();
                 while (parent.firstChild) fragment.appendChild(parent.firstChild);
