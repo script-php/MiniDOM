@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.94 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.95 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.94';
+    const VERSION = '0.0.95';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -987,7 +987,7 @@
             const accepts = selector == null ? null : matcher(selector);
             const found = [];
             for (const element of this.elements) {
-                const parent = element.parentElement;
+                const parent = element?.parentElement;
                 if (parent && (!accepts || accepts(parent))) found.push(parent);
             }
             return this._push(found);
@@ -997,6 +997,7 @@
             const accepts = selector == null ? null : matcher(selector);
             const found = [];
             for (const element of this.elements) {
+                if (!element) continue;
                 const target = element.nodeType === 1 && element.localName === 'template' &&
                     element.namespaceURI === 'http://www.w3.org/1999/xhtml'
                     ? element.content : element;
@@ -1011,7 +1012,7 @@
         closest(selector, context) {
             const found = [];
             for (const element of this.elements) {
-                if (typeof element.closest !== 'function') continue;
+                if (typeof element?.closest !== 'function') continue;
                 const boundary = context == null ? null :
                     (typeof context === 'string' ? select(context)[0] : nodes(context)[0]);
                 let match = element;
@@ -1033,7 +1034,7 @@
             const stops = until === undefined ? () => false : matcher(until);
             const found = [];
             for (const element of this.elements) {
-                let node = element[direction];
+                let node = element?.[direction];
                 while (node && node.nodeType === 1) {
                     if (stops(node)) break;
                     if (accepts(node)) found.push(node);
@@ -1045,6 +1046,7 @@
         contents() {
             const found = [];
             for (const element of this.elements) {
+                if (!element) continue;
                 if (element.contentDocument) found.push(element.contentDocument);
                 else if (element.tagName === 'TEMPLATE') for (const child of element.content.childNodes) found.push(child);
                 else if (element.childNodes) for (const child of element.childNodes) found.push(child);
@@ -1132,7 +1134,7 @@
             const found = [];
             let index = 0;
             for (const element of this.elements) {
-                if (!element.parentElement) continue;
+                if (!element?.parentElement) continue;
                 for (const sibling of element.parentElement.children) {
                     if (sibling === element) continue;
                     if (!matches || matches(sibling, index)) found.push(sibling);
@@ -1147,7 +1149,7 @@
             const found = [];
             let index = 0;
             for (const element of this.elements) {
-                const sibling = element.nextElementSibling;
+                const sibling = element?.nextElementSibling;
                 if (!sibling) continue;
                 if (!matches || matches(sibling, index)) found.push(sibling);
                 index++;
@@ -1160,7 +1162,7 @@
             const found = [];
             let index = 0;
             for (const element of this.elements) {
-                const sibling = element.previousElementSibling;
+                const sibling = element?.previousElementSibling;
                 if (!sibling) continue;
                 if (!matches || matches(sibling, index)) found.push(sibling);
                 index++;
