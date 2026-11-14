@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.15 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.16 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.15';
+    const VERSION = '0.0.16';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -148,27 +148,50 @@
         return elements.filter(element => selectorMatch(element, ':' + test));
     }
 
+    // Cache only the expensive extended-selector parsing. A bounded Map avoids
+    // unbounded memory growth when selectors contain dynamic values.
+    const selectorPlanCache = new Map();
+    const SELECTOR_PLAN_LIMIT = 128;
+    function selectorPlan(selector) {
+        let plan = selectorPlanCache.get(selector);
+        if (plan) return plan;
+        plan = splitSelector(selector, true).map(group => splitSelector(group).map(token => {
+            if (/^[>+~ ]$/.test(token)) return { combinator: token };
+            const { css, tests } = pseudoParts(token);
+            const notEqual = [];
+            const nativeCSS = css.replace(/\[([\w:-]+)\s*!=\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))\]/g,
+                (_, name, double, single, bare) => {
+                    notEqual.push([name, double ?? single ?? bare]); return '';
+                }) || '*';
+            return { nativeCSS, tests, notEqual };
+        }));
+        if (selectorPlanCache.size >= SELECTOR_PLAN_LIMIT)
+            selectorPlanCache.delete(selectorPlanCache.keys().next().value);
+        selectorPlanCache.set(selector, plan);
+        return plan;
+    }
+
     function queryExtended(selector, roots) {
-        // Keep standard CSS selection on the browser's fast, complete parser.
+        // Fast path: avoid parsing and intermediate arrays for ordinary CSS.
+        // Reset regex state explicitly because the pseudo detector is global.
         customPseudo.lastIndex = 0;
-        if (!customPseudo.test(selector) && !/\[[\w:-]+\s*!=/.test(selector)) {
+        const extended = customPseudo.test(selector) || /\[[\w:-]+\s*!=/.test(selector);
+        if (!extended) {
+            if (roots.length === 1) {
+                const root = roots[0];
+                return root?.querySelectorAll ? Array.from(root.querySelectorAll(selector)) : [];
+            }
             const found = [];
             for (const root of roots) if (root?.querySelectorAll)
-                found.push(...root.querySelectorAll(selector));
+                for (const element of root.querySelectorAll(selector)) found.push(element);
             return unique(found);
         }
         const all = [];
-        for (const group of splitSelector(selector, true)) {
-            const tokens = splitSelector(group);
-            let current = [...roots], combinator = ' ';
+        for (const tokens of selectorPlan(selector)) {
+            let current = roots, combinator = ' ';
             for (const token of tokens) {
-                if (/^[>+~ ]$/.test(token)) { combinator = token; continue; }
-                const { css, tests } = pseudoParts(token);
-                const notEqual = [];
-                const nativeCSS = css.replace(/\[([\w:-]+)\s*!=\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))\]/g,
-                    (_, name, double, single, bare) => {
-                        notEqual.push([name, double ?? single ?? bare]); return '';
-                    }) || '*';
+                if (token.combinator) { combinator = token.combinator; continue; }
+                const { nativeCSS, tests, notEqual } = token;
                 const found = [];
                 for (const root of current) {
                     if (!root) continue;
