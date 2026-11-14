@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.44 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.45 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.44';
+    const VERSION = '0.0.45';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -50,15 +50,18 @@
     }
 
     function select(value, context) {
-        if (typeof value !== 'string') return nodes(value);
+        // TrustedHTML is an object, not a string. Preserve its brand when
+        // creating elements, including under an enforced Trusted Types CSP.
+        const trusted = Boolean(global.TrustedHTML && value instanceof global.TrustedHTML);
+        if (typeof value !== 'string' && !trusted) return nodes(value);
 
         // jQuery-style element creation. Only markup-shaped strings are parsed;
         // ordinary strings remain CSS selectors. Do NOT interpolate untrusted
         // data into HTML strings: use .text() / .val() for user input.
-        const trimmed = value.trim();
+        const trimmed = trusted ? String(value).trim() : value.trim();
         if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
             const template = global.document.createElement('template');
-            template.innerHTML = trimmed;
+            template.innerHTML = trusted ? value : trimmed;
             const created = [...template.content.childNodes];
             for (const node of created) template.content.removeChild(node);
             return created;
