@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.24 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.25 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.24';
+    const VERSION = '0.0.25';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -435,7 +435,7 @@
                         context = match;
                     }
                     if (removeOnce) unbindRecord(element, record);
-                    if (eventData !== undefined) event.data = eventData;
+                    event.data = eventData;
                     event.delegateTarget = element;
                     event.handleObj = { type: token.type, selector, handler };
                     handler.call(context, event);
@@ -1553,8 +1553,12 @@
             const event = new global.CustomEvent(token.type, { detail, cancelable: true });
             for (const record of [...(eventMemory.get(element) || [])]) {
                 if (!matchesToken(record, token) || record.selector !== null) continue;
+                // A previous handler can remove another handler while we iterate.
+                // Do not invoke records that have already been unbound.
+                if (!(eventMemory.get(element) || []).includes(record)) continue;
                 if (record.once) unbindRecord(element, record);
-                if (record.eventData !== undefined) event.data = record.eventData;
+                // Do not leak event.data from a preceding handler.
+                event.data = record.eventData;
                 event.delegateTarget = element;
                 event.handleObj = { type: record.type, selector: null, handler: record.handler };
                 result = record.handler.call(element, event);
