@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.115 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.116 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.115';
+    const VERSION = '0.0.116';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -624,7 +624,13 @@
             mutationMemory.delete(node);
         }
         const animation = fadeMemory.get(node);
-        if (animation) { animation.cancel(); fadeMemory.delete(node); }
+        if (animation) {
+            // Cancellation may invoke user-controlled animation hooks or
+            // throw in custom/polyfilled implementations. Never let a failed
+            // cancellation retain the entry or abort the remaining subtree.
+            fadeMemory.delete(node);
+            try { animation.cancel(); } catch (_) { /* cleanup is best effort */ }
+        }
     }
 
     function cleanTree(node) {
