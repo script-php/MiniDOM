@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.70 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.71 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.70';
+    const VERSION = '0.0.71';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -814,8 +814,16 @@
         const inserted = [];
         // A node cannot be inserted into itself or one of its descendants.
         // Skip invalid destinations without disturbing other targets.
-        const validTargets = targets.filter(target => !source.some(node =>
-            node === target || (node.contains && node.contains(target))));
+        // A destination is invalid if it is a source node or is nested
+        // inside one. Checking each target's ancestor chain against a Set
+        // avoids the source-count × target-count containment scan.
+        const sourceSet = new Set(source);
+        const validTargets = targets.filter(target => {
+            for (let node = target; node; node = node.parentNode) {
+                if (sourceSet.has(node)) return false;
+            }
+            return true;
+        });
         if (!validTargets.length) return inserted;
         // HTML templates store children in .content, not their own childNodes.
         const insertionTarget = target =>
