@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.32 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.33 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.32';
+    const VERSION = '0.0.33';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -162,6 +162,13 @@
 
     function applyPseudo(elements, test) {
         if (typeof test === 'object' && test.negate) {
+            // Positional pseudos apply to the current result set, not each
+            // element independently (where :first would match every element).
+            const positional = /^(?:first|last|even|odd|eq\(-?\d+\)|lt\(-?\d+\)|gt\(-?\d+\))$/.test(test.negate);
+            if (positional) {
+                const excluded = new Set(applyPseudo(elements, test.negate));
+                return elements.filter(element => !excluded.has(element));
+            }
             return elements.filter(element => !selectorMatch(element, ':' + test.negate));
         }
         const n = elements.length;
