@@ -1,14 +1,17 @@
-/* MiniDOM v0.0.12 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.13 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.12';
+    const VERSION = '0.0.13';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
     const dataMemory = new WeakMap();
     const resizeMemory = new WeakMap();
     let sharedResizeObserver = null;
+    const mutationMemory = new WeakMap();
+    const fadeMemory = new WeakMap();
+
 
     function isNode(value) {
         return value != null && typeof value.nodeType === 'number';
@@ -388,6 +391,13 @@
         dataMemory.delete(node);
         displayMemory.delete(node);
         removeResizeListeners(node);
+        const observers = mutationMemory.get(node);
+        if (observers) {
+            for (const observer of observers.values()) observer.disconnect();
+            mutationMemory.delete(node);
+        }
+        const animation = fadeMemory.get(node);
+        if (animation) { animation.cancel(); fadeMemory.delete(node); }
     }
 
     function cleanTree(node) {
@@ -690,8 +700,10 @@
         }
 
         addClass(names) {
-            const tokens = classes(names);
             return this.each((i, element) => {
+                const next = typeof names === 'function'
+                    ? names.call(element, i, element.className) : names;
+                const tokens = classes(next);
                 if (element.classList && tokens.length) element.classList.add(...tokens);
             });
         }
@@ -704,13 +716,14 @@
         }
 
         toggleClass(names, force) {
-            const tokens = classes(names);
             return this.each((i, element) => {
                 if (!element.classList) return;
-                tokens.forEach(token => {
+                const next = typeof names === 'function'
+                    ? names.call(element, i, element.className, force) : names;
+                for (const token of classes(next)) {
                     if (force === undefined) element.classList.toggle(token);
                     else element.classList.toggle(token, Boolean(force));
-                });
+                }
             });
         }
 
@@ -799,7 +812,10 @@
         }
 
         removeAttr(name) {
-            return this.each((i, element) => element.removeAttribute?.(name));
+            const names = String(name).trim().split(/\s+/).filter(Boolean);
+            return this.each((i, element) => {
+                for (const attr of names) element.removeAttribute?.(attr);
+            });
         }
 
         css(property, value) {
@@ -808,8 +824,11 @@
                     if (!element.style) return;
                     for (const [name, newValue] of Object.entries(property)) {
                         const key = cssName(name);
-                        if (newValue == null) element.style.removeProperty(key);
-                        else element.style.setProperty(key, String(newValue));
+                        const computed = typeof newValue === 'function'
+                            ? newValue.call(element, i, global.getComputedStyle(element).getPropertyValue(key))
+                            : newValue;
+                        if (computed == null) element.style.removeProperty(key);
+                        else element.style.setProperty(key, String(computed));
                     }
                 });
             }
@@ -844,8 +863,11 @@
 
             return this.each((i, element) => {
                 if (!element.style) return;
-                if (value === null) element.style.removeProperty(key);
-                else element.style.setProperty(key, String(value));
+                const computed = typeof value === 'function'
+                    ? value.call(element, i, global.getComputedStyle(element).getPropertyValue(key))
+                    : value;
+                if (computed == null) element.style.removeProperty(key);
+                else element.style.setProperty(key, String(computed));
             });
         }
 
@@ -881,8 +903,30 @@
         // Dimension getters use the first matched node and return CSS pixels.
         // For window: viewport dimensions; for document: full page dimensions.
         // These are snapshots; use observeResize() to react to element changes.
-        width() { return dimensionOf(this.get(), 'width'); }
-        height() { return dimensionOf(this.get(), 'height'); }
+        width(value) { return this._dimension('width', value); }
+        height(value) { return this._dimension('height', value); }
+        _dimension(axis, value) {
+            if (value === undefined) return dimensionOf(this.get(), axis);
+            return this.each((i, element) => {
+                if (!element.style) return;
+                const previous = dimensionOf(element, axis);
+                const next = typeof value === 'function' ? value.call(element, i, previous) : value;
+                if (next == null) { element.style.removeProperty(axis); return; }
+                if (typeof next === 'number' && !Number.isFinite(next))
+                    throw new TypeError('Dimension must be finite');
+                const target = typeof next === 'number' ? Math.max(0, next) + 'px' : String(next);
+                // width()/height() use content-box sizes regardless of box-sizing.
+                if (typeof next === 'number' && global.getComputedStyle(element).boxSizing === 'border-box') {
+                    const style = global.getComputedStyle(element);
+                    const extras = axis === 'width'
+                        ? parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) +
+                          parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth)
+                        : parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) +
+                          parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+                    element.style.setProperty(axis, (Math.max(0, next) + (extras || 0)) + 'px');
+                } else element.style.setProperty(axis, target);
+            });
+        }
         innerWidth() { return dimensionOf(this.get(), 'width', 'inner'); }
         innerHeight() { return dimensionOf(this.get(), 'height', 'inner'); }
         outerWidth(includeMargin = false) {
@@ -906,6 +950,107 @@
             const num = Number(value);
             if (!Number.isFinite(num)) throw new TypeError('scrollLeft() requires a finite number');
             return this.each((i, element) => scrollOf(element, 'left', num));
+        }
+
+        contains(target) {
+            const root = this.get();
+            const children = nodes(target);
+            return Boolean(root?.contains && children.some(child => root !== child && root.contains(child)));
+        }
+
+        offsetParent() {
+            return this._push(this.elements.map(element => element.offsetParent).filter(Boolean));
+        }
+
+        serializeJSON() {
+            const result = Object.create(null);
+            for (const { name, value } of this.serializeArray()) {
+                if (Object.hasOwn(result, name)) {
+                    if (!Array.isArray(result[name])) result[name] = [result[name]];
+                    result[name].push(value);
+                } else result[name] = value;
+            }
+            return result;
+        }
+
+        reset() {
+            return this.each((i, element) => {
+                if (element instanceof global.HTMLFormElement) element.reset();
+            });
+        }
+
+        // Observe children added/removed under each selected root.
+        // Callback receives { added, removed, records, root }.
+        observeMutations(callback, options = {}) {
+            if (typeof callback !== 'function') throw new TypeError('Callback required');
+            if (!global.MutationObserver) throw new Error('MutationObserver unavailable');
+            return this.each((i, root) => {
+                if (!root?.nodeType) return;
+                let entries = mutationMemory.get(root);
+                if (!entries) { entries = new Map(); mutationMemory.set(root, entries); }
+                if (entries.has(callback)) return;
+                const observer = new global.MutationObserver(records => {
+                    const added = [], removed = [];
+                    for (const record of records) {
+                        added.push(...record.addedNodes);
+                        removed.push(...record.removedNodes);
+                    }
+                    callback.call(root, { added, removed, records, root });
+                });
+                observer.observe(root, {
+                    childList: true, subtree: true, ...options
+                });
+                entries.set(callback, observer);
+            });
+        }
+
+        unobserveMutations(callback) {
+            return this.each((i, root) => {
+                const entries = mutationMemory.get(root);
+                if (!entries) return;
+                for (const [fn, observer] of entries) {
+                    if (callback === undefined || callback === fn) {
+                        observer.disconnect();
+                        entries.delete(fn);
+                    }
+                }
+                if (!entries.size) mutationMemory.delete(root);
+            });
+        }
+
+        fadeIn(duration = 200) {
+            return this._fade(true, duration);
+        }
+
+        fadeOut(duration = 200) {
+            return this._fade(false, duration);
+        }
+
+        _fade(show, duration) {
+            if (!Number.isFinite(duration) || duration < 0) throw new TypeError('Invalid duration');
+            return this.each((i, element) => {
+                if (!element.style) return;
+                const previous = fadeMemory.get(element);
+                if (previous) previous.cancel();
+                if (show) new Collection([element]).show();
+                if (!element.animate || duration === 0) {
+                    if (!show) new Collection([element]).hide();
+                    return;
+                }
+                const from = show ? 0 : Number(global.getComputedStyle(element).opacity) || 1;
+                const to = show ? 1 : 0;
+                const animation = element.animate([{ opacity: from }, { opacity: to }],
+                    { duration, easing: 'ease', fill: 'none' });
+                fadeMemory.set(element, animation);
+                animation.onfinish = () => {
+                    if (fadeMemory.get(element) !== animation) return;
+                    fadeMemory.delete(element);
+                    if (!show) new Collection([element]).hide();
+                };
+                animation.oncancel = () => {
+                    if (fadeMemory.get(element) === animation) fadeMemory.delete(element);
+                };
+            });
         }
 
         // Document coordinates, including the current page scroll.
