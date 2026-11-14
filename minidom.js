@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.59 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.60 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.59';
+    const VERSION = '0.0.60';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1169,6 +1169,10 @@
                     ? first.content.textContent : first?.textContent;
             }
             return this.each((i, element) => {
+                // Window and Document are valid selection roots but cannot
+                // receive text content. In particular, never create an
+                // accidental window.textContent property.
+                if (!isNode(element) || element.nodeType === 9) return;
                 const previous = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
                     ? element.content.textContent : element.textContent;
                 const next = typeof value === 'function' ? value.call(element, i, previous) : value;
