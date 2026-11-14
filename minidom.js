@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.16 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.17 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.16';
+    const VERSION = '0.0.17';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -81,6 +81,7 @@
                 else if (ch === quote) quote = '';
                 continue;
             }
+            if (ch === '\\' && i + 1 < input.length) { buffer += ch + input[++i]; continue; }
             if (ch === '"' || ch === "'") { quote = ch; buffer += ch; continue; }
             if (ch === '[') bracket++;
             if (ch === ']') bracket--;
@@ -116,6 +117,7 @@
                 else if (ch === quote) quote = '';
                 i++; continue;
             }
+            if (ch === '\\' && i + 1 < part.length) { css += ch + part[i + 1]; i += 2; continue; }
             if (ch === '"' || ch === "'") { quote = ch; css += ch; i++; continue; }
             if (ch === '[') bracket++;
             if (ch === ']') bracket--;
@@ -175,7 +177,9 @@
         // Fast path: avoid parsing and intermediate arrays for ordinary CSS.
         // Reset regex state explicitly because the pseudo detector is global.
         customPseudo.lastIndex = 0;
-        const extended = customPseudo.test(selector) || /\[[\w:-]+\s*!=/.test(selector);
+        const extended = /\[[\w:-]+\s*!=/.test(selector) ||
+            splitSelector(selector, true).some(group => splitSelector(group).some(token =>
+                !/^[>+~ ]$/.test(token) && pseudoParts(token).tests.length > 0));
         if (!extended) {
             if (roots.length === 1) {
                 const root = roots[0];
@@ -649,14 +653,19 @@
                 : Boolean(target.append && target.prepend)
         );
         const inserted = [];
+        // A node cannot be inserted into itself or one of its descendants.
+        // Skip invalid destinations without disturbing other targets.
+        const validTargets = targets.filter(target => !source.some(node =>
+            node === target || (node.contains && node.contains(target))));
+        if (!validTargets.length) return inserted;
         // Avoid creating a DocumentFragment for the most common case: one
         // destination and one source node. The native insertion moves the node.
-        if (targets.length === 1 && source.length === 1) {
-            targets[0][position](source[0]);
+        if (validTargets.length === 1 && source.length === 1) {
+            validTargets[0][position](source[0]);
             return [source[0]];
         }
-        targets.forEach((target, index) => {
-            const copies = index === targets.length - 1
+        validTargets.forEach((target, index) => {
+            const copies = index === validTargets.length - 1
                 ? source
                 : source.map(node => cloneNodeWithState(node, true));
             if (!copies.length) return;
