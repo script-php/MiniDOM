@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.128 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.129 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.128';
+    const VERSION = '0.0.129';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -486,7 +486,15 @@
                 eventMemory.set(element, records);
                 if (signal) {
                     record.abortHandler = () => unbindRecord(element, record);
-                    signal.addEventListener('abort', record.abortHandler, { once: true });
+                    // Installing the abort hook is part of registration. If a
+                    // custom signal rejects it, roll back the native listener
+                    // and our record instead of leaving a half-bound handler.
+                    try {
+                        signal.addEventListener('abort', record.abortHandler, { once: true });
+                    } catch (error) {
+                        unbindRecord(element, record);
+                        throw error;
+                    }
                     if (signal.aborted) unbindRecord(element, record);
                 }
             }
