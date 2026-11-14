@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.5 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.6 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.5';
+    const VERSION = '0.0.6';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -164,7 +164,7 @@
             if (!element.addEventListener || signal?.aborted) return;
             for (const type of types) {
                 const record = {
-                    type, selector, handler, options: nativeOptions,
+                    type, selector, handler, options: nativeOptions, once: removeOnce,
                     wrapped: null, signal, abortHandler: null
                 };
                 record.wrapped = function (event) {
@@ -196,6 +196,92 @@
         });
     }
 
+    // MiniDOM stores events, data and previous display values in WeakMaps.
+    // Detaching a node leaves them intact; destructive removals clean the
+    // entire subtree (including text nodes with MiniDOM listeners).
+    function cleanNode(node) {
+        for (const record of [...(eventMemory.get(node) || [])]) unbindRecord(node, record);
+        dataMemory.delete(node);
+        displayMemory.delete(node);
+    }
+
+    function cleanTree(node) {
+        if (!node) return;
+        for (const child of [...(node.childNodes || [])]) cleanTree(child);
+        cleanNode(node);
+    }
+
+    function cleanChildren(node) {
+        for (const child of [...(node.childNodes || [])]) cleanTree(child);
+    }
+
+    // Copy user data without accidentally sharing ordinary nested objects.
+    // Cycles and common built-in structured values are supported. Functions,
+    // DOM nodes and non-plain class instances retain their identity.
+    function copyDataValue(value, seen = new WeakMap()) {
+        if (value === null || typeof value !== 'object') return value;
+        if (isNode(value)) return value;
+        if (seen.has(value)) return seen.get(value);
+        if (Array.isArray(value)) {
+            const result = [];
+            seen.set(value, result);
+            for (const item of value) result.push(copyDataValue(item, seen));
+            return result;
+        }
+        if (value instanceof Date) return new Date(value.getTime());
+        if (value instanceof RegExp) return new RegExp(value.source, value.flags);
+        if (value instanceof Map) {
+            const result = new Map();
+            seen.set(value, result);
+            for (const [key, val] of value) result.set(copyDataValue(key, seen), copyDataValue(val, seen));
+            return result;
+        }
+        if (value instanceof Set) {
+            const result = new Set();
+            seen.set(value, result);
+            for (const item of value) result.add(copyDataValue(item, seen));
+            return result;
+        }
+        if (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) {
+            const result = Object.create(Object.getPrototypeOf(value));
+            seen.set(value, result);
+            for (const key of Object.keys(value)) result[key] = copyDataValue(value[key], seen);
+            return result;
+        }
+        return value;
+    }
+
+    // Only MiniDOM-managed listeners can be copied; the browser provides no
+    // API to introspect listeners added using native addEventListener().
+    function copyManagedState(source, destination) {
+        const saved = dataMemory.get(source);
+        if (saved) dataMemory.set(destination, copyDataValue(saved));
+        const display = displayMemory.get(source);
+        if (display) displayMemory.set(destination, { ...display });
+        for (const record of eventMemory.get(source) || []) {
+            bindEvents(new Collection([destination]), record.type, record.selector,
+                record.handler, record.options, record.once);
+        }
+    }
+
+    function cloneNodeWithState(source, copyState = false, deepState = copyState) {
+        const cloned = source.cloneNode(true);
+        if (copyState) copyManagedState(source, cloned);
+        if (deepState) {
+            // A pairwise walk handles elements, text, comments and fragments.
+            const walk = (from, to) => {
+                for (let i = 0; i < from.childNodes.length; i++) {
+                    const fromChild = from.childNodes[i];
+                    const toChild = to.childNodes[i];
+                    copyManagedState(fromChild, toChild);
+                    walk(fromChild, toChild);
+                }
+            };
+            walk(source, cloned);
+        }
+        return cloned;
+    }
+
     // An insertion accepts HTML/text, native nodes, MiniDOM selections, and
     // (possibly nested) iterables of these. Raw HTML must be trusted.
     function contentNodes(value) {
@@ -208,8 +294,8 @@
         if (typeof value === 'number' || typeof value === 'boolean') {
             return [global.document.createTextNode(String(value))];
         }
-        if (value instanceof Collection) return [...value.elements];
-        if (isNode(value)) return [value];
+        if (value instanceof Collection) return value.elements.flatMap(contentNodes);
+        if (isNode(value)) return value.nodeType === 11 ? [...value.childNodes] : [value];
         if (typeof value[Symbol.iterator] === 'function') {
             return [...value].flatMap(contentNodes);
         }
@@ -228,7 +314,7 @@
         targets.forEach((target, index) => {
             const copies = index === targets.length - 1
                 ? source
-                : source.map(node => node.cloneNode(true));
+                : source.map(node => cloneNodeWithState(node, true));
             if (!copies.length) return;
             const fragment = global.document.createDocumentFragment();
             fragment.append(...copies);
@@ -375,13 +461,19 @@
 
         text(value) {
             if (value === undefined) return this.get()?.textContent;
-            return this.each((i, element) => { element.textContent = value == null ? '' : value; });
+            return this.each((i, element) => {
+                cleanChildren(element);
+                element.textContent = value == null ? '' : value;
+            });
         }
 
         html(value) {
             if (value === undefined) return this.get()?.innerHTML;
             return this.each((i, element) => {
-                if ('innerHTML' in element) element.innerHTML = value == null ? '' : value;
+                if ('innerHTML' in element) {
+                    cleanChildren(element);
+                    element.innerHTML = value == null ? '' : value;
+                }
             });
         }
 
@@ -635,19 +727,75 @@
             return this._push(insertNodes(select(target), this.elements, 'prepend'));
         }
 
-        clone() {
-            // Native cloneNode copies child nodes/attributes, not listeners.
-            return this._push(this.elements.map(element => element.cloneNode(true)));
+        // .clone() copies DOM only; .clone(true) copies managed events/data
+        // on the node and descendants; .clone(true, false) copies root only.
+        clone(withDataAndEvents = false, deepWithDataAndEvents = withDataAndEvents) {
+            return this._push(this.elements.filter(element => isNode(element))
+                .map(element => cloneNodeWithState(element, withDataAndEvents, deepWithDataAndEvents)));
+        }
+
+        // Detach preserves MiniDOM state. Append/prepend can reattach later.
+        detach() {
+            return this.each((i, element) => element.parentNode?.removeChild(element));
         }
 
         empty() {
             return this.each((i, element) => {
-                if (element.replaceChildren) element.replaceChildren();
+                if (!element.replaceChildren) return;
+                cleanChildren(element);
+                element.replaceChildren();
             });
         }
 
         remove() {
-            return this.each((i, element) => element.remove?.());
+            return this.each((i, element) => {
+                cleanTree(element);
+                element.parentNode?.removeChild(element);
+            });
+        }
+
+        replaceWith(...content) {
+            const targets = this.elements.filter(element => element.parentNode && isNode(element));
+            const source = content.flatMap(contentNodes);
+            targets.forEach((element, index) => {
+                const copies = index === targets.length - 1
+                    ? source
+                    : source.map(node => cloneNodeWithState(node, true));
+                const fragment = global.document.createDocumentFragment();
+                fragment.append(...copies);
+                element.parentNode.replaceChild(fragment, element);
+                // Any children moved out of the old element remain live.
+                cleanTree(element);
+            });
+            return this;
+        }
+
+        // Wrap each element with a copy of the first wrapper element.
+        // Content can be trusted HTML or a native/MiniDOM element.
+        wrap(content) {
+            const template = contentNodes(content).find(node => node.nodeType === 1);
+            if (!template) return this;
+            return this.each((i, element) => {
+                if (!element.parentNode || element.nodeType !== 1) return;
+                const outer = cloneNodeWithState(template, true);
+                element.parentNode.insertBefore(outer, element);
+                let inner = outer;
+                while (inner.firstElementChild) inner = inner.firstElementChild;
+                inner.appendChild(element);
+            });
+        }
+
+        // Remove each distinct direct parent, keeping its children and their
+        // managed event/data state. Never unwrap <html> or <body>.
+        unwrap() {
+            const parents = unique(this.elements.map(element => element.parentElement))
+                .filter(parent => parent && parent.parentNode &&
+                    parent !== global.document.body && parent !== global.document.documentElement);
+            for (const parent of parents) {
+                parent.replaceWith(...[...parent.childNodes]);
+                cleanNode(parent);
+            }
+            return this;
         }
     }
 
