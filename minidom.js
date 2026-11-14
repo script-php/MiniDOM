@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.8 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.9 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.8';
+    const VERSION = '0.0.9';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -48,6 +48,18 @@
 
     function select(value, context) {
         if (typeof value !== 'string') return nodes(value);
+
+        // jQuery-style element creation. Only markup-shaped strings are parsed;
+        // ordinary strings remain CSS selectors. Do NOT interpolate untrusted
+        // data into HTML strings: use .text() / .val() for user input.
+        const trimmed = value.trim();
+        if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+            const template = global.document.createElement('template');
+            template.innerHTML = trimmed;
+            const created = [...template.content.childNodes];
+            for (const node of created) template.content.removeChild(node);
+            return created;
+        }
 
         // A context can itself be a CSS selector, node, or MiniDOM collection.
         const roots = context === undefined
@@ -98,6 +110,35 @@
             // Keep ready callbacks asynchronous when the DOM is already ready.
             global.queueMicrotask(run);
         }
+    }
+
+    // Native form control values with jQuery-style multiple-select support.
+    // Non-form nodes return undefined; file input assignment is governed by
+    // native browser security restrictions.
+    function readValue(element) {
+        if (!element || !('value' in element)) return undefined;
+        if (global.HTMLSelectElement && element instanceof global.HTMLSelectElement && element.multiple) {
+            return Array.from(element.selectedOptions, option => option.value);
+        }
+        return element.value;
+    }
+
+    function writeValue(element, value) {
+        if (!element || !('value' in element)) return;
+        if (Array.isArray(value)) {
+            const values = new Set(value.map(item => item == null ? '' : String(item)));
+            if (global.HTMLSelectElement && element instanceof global.HTMLSelectElement) {
+                for (const option of element.options) option.selected = values.has(option.value);
+                return;
+            }
+            if (element.matches?.('input[type="checkbox"], input[type="radio"]')) {
+                element.checked = values.has(element.value);
+                return;
+            }
+            element.value = value.map(item => item == null ? '' : String(item)).join(',');
+            return;
+        }
+        element.value = value == null ? '' : String(value);
     }
 
     function dataKey(key) {
@@ -499,6 +540,21 @@
             return this.elements.at(index);
         }
 
+        // Returns a copy, so callers cannot mutate the collection's internals.
+        toArray() { return [...this.elements]; }
+
+        // With no argument, the first element's sibling index. A string checks
+        // its position in the global CSS selection; a node/collection checks
+        // whether that node appears in this selection. -1 means not found.
+        index(value) {
+            if (value === undefined) {
+                const element = this.get();
+                return element?.parentElement ? Array.prototype.indexOf.call(element.parentElement.children, element) : -1;
+            }
+            if (typeof value === 'string') return Array.prototype.indexOf.call(select(value), this.get());
+            return this.elements.indexOf(value instanceof Collection ? value.get() : value);
+        }
+
         first() { return this.eq(0); }
         last() { return this.eq(-1); }
         eq(index) { return this._push([this.get(index)]); }
@@ -556,6 +612,19 @@
 
         is(selector) {
             return this.elements.some(matcher(selector));
+        }
+
+        // Keep only elements containing a matching descendant. Unlike find(),
+        // this returns the outer elements and preserves .end() traversal.
+        has(selector) {
+            if (typeof selector === 'string') {
+                return this._push(this.elements.filter(element => element.querySelector?.(selector)));
+            }
+            const targets = nodes(selector);
+            return this._push(this.elements.filter(element =>
+                typeof element.contains === 'function' &&
+                targets.some(child => child !== element && element.contains(child))
+            ));
         }
 
         add(selector, context) {
@@ -637,8 +706,9 @@
         text(value) {
             if (value === undefined) return this.get()?.textContent;
             return this.each((i, element) => {
+                const next = typeof value === 'function' ? value.call(element, i, element.textContent) : value;
                 cleanChildren(element);
-                element.textContent = value == null ? '' : value;
+                element.textContent = next == null ? '' : String(next);
             });
         }
 
@@ -646,16 +716,19 @@
             if (value === undefined) return this.get()?.innerHTML;
             return this.each((i, element) => {
                 if ('innerHTML' in element) {
+                    const next = typeof value === 'function' ? value.call(element, i, element.innerHTML) : value;
                     cleanChildren(element);
-                    element.innerHTML = value == null ? '' : value;
+                    // As with .append(), only pass trusted markup here.
+                    element.innerHTML = next == null ? '' : String(next);
                 }
             });
         }
 
         val(value) {
-            if (value === undefined) return this.get()?.value;
+            if (value === undefined) return readValue(this.get());
             return this.each((i, element) => {
-                if ('value' in element) element.value = value == null ? '' : value;
+                const next = typeof value === 'function' ? value.call(element, i, readValue(element)) : value;
+                writeValue(element, next);
             });
         }
 
