@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.31 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.32 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.31';
+    const VERSION = '0.0.32';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -952,18 +952,38 @@
         even() { return this._push(this.elements.filter((_, i) => i % 2 === 0)); }
         odd() { return this._push(this.elements.filter((_, i) => i % 2 === 1)); }
 
+        // Positional pseudo-selectors on a collection refer to that collection,
+        // not to the first matching element in the entire document.
+        _positionalSelection(selector) {
+            if (typeof selector !== 'string') return null;
+            const match = /^:(first|last|even|odd|eq\(-?\d+\)|lt\(-?\d+\)|gt\(-?\d+\))$/.exec(selector);
+            return match ? new Set(applyPseudo(this.elements, match[1])) : null;
+        }
+
         filter(selector) {
-            if (typeof selector === 'string' && /^:(first|last|even|odd|eq\(-?\d+\)|lt\(-?\d+\)|gt\(-?\d+\))$/.test(selector))
-                return this._push(applyPseudo(this.elements, selector.slice(1)));
+            const positional = this._positionalSelection(selector);
+            if (positional) return this._push(this.elements.filter(element => positional.has(element)));
+            // Negation of a positional pseudo also operates on this collection.
+            if (typeof selector === 'string') {
+                const negated = /^:not\((:(?:first|last|even|odd|eq\(-?\d+\)|lt\(-?\d+\)|gt\(-?\d+\)))\)$/.exec(selector);
+                if (negated) {
+                    const excluded = this._positionalSelection(negated[1]);
+                    return this._push(this.elements.filter(element => !excluded.has(element)));
+                }
+            }
             return this._push(this.elements.filter(matcher(selector)));
         }
 
         not(selector) {
+            const positional = this._positionalSelection(selector);
+            if (positional) return this._push(this.elements.filter(element => !positional.has(element)));
             const matches = matcher(selector);
             return this._push(this.elements.filter((element, index) => !matches(element, index)));
         }
 
         is(selector) {
+            const positional = this._positionalSelection(selector);
+            if (positional) return positional.size > 0;
             return this.elements.some(matcher(selector));
         }
 
