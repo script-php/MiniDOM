@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.41 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.42 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.41';
+    const VERSION = '0.0.42';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -925,8 +925,11 @@
             const accepts = selector == null ? null : matcher(selector);
             const found = [];
             for (const element of this.elements) {
-                if (!element.children) continue;
-                for (const child of element.children) {
+                const target = element.nodeType === 1 && element.localName === 'template' &&
+                    element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                    ? element.content : element;
+                if (!target.children) continue;
+                for (const child of target.children) {
                     if (!accepts || accepts(child)) found.push(child);
                 }
             }
@@ -1888,8 +1891,12 @@
                 const wrapper = cloneNodeWithState(template, true);
                 let deepest = wrapper;
                 while (deepest.firstElementChild) deepest = deepest.firstElementChild;
-                while (element.firstChild) deepest.appendChild(element.firstChild);
-                element.append(wrapper);
+                // Template descendants live in .content, not element.childNodes.
+                const target = element.nodeType === 1 && element.localName === 'template' &&
+                    element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                    ? element.content : element;
+                while (target.firstChild) deepest.appendChild(target.firstChild);
+                target.append(wrapper);
             });
         }
         removeProp(name) {
