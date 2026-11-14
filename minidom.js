@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.107 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.108 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.107';
+    const VERSION = '0.0.108';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2039,8 +2039,12 @@
             // Deduplicate selections and keep only top-level elements. A
             // repeated element must not be moved to the end of its own
             // wrapper, and a selected descendant travels with its ancestor.
+            // Never move a document's structural roots into a wrapper. Such
+            // moves can corrupt the document tree (including foreign documents).
             const elements = topLevelNodes(this.elements.filter(element =>
-                element && element.nodeType === 1 && element.parentNode));
+                element && element.nodeType === 1 && element.parentNode &&
+                element !== element.ownerDocument?.documentElement &&
+                element !== element.ownerDocument?.body));
             const template = contentNodes(content).find(node => node.nodeType === 1);
             if (!elements.length || !template) return this;
             const wrapper = cloneNodeWithState(template, true);
@@ -2173,7 +2177,9 @@
             return this.each((i, element) => {
                 if (seen.has(element)) return;
                 seen.add(element);
-                if (!element || !element.parentNode || element.nodeType !== 1) return;
+                if (!element || !element.parentNode || element.nodeType !== 1 ||
+                    element === element.ownerDocument?.documentElement ||
+                    element === element.ownerDocument?.body) return;
                 const outer = cloneNodeWithState(template, true);
                 element.parentNode.insertBefore(outer, element);
                 let inner = outer;
