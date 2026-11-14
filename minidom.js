@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.117 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.118 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.117';
+    const VERSION = '0.0.118';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1702,7 +1702,13 @@
             return this.each((i, element) => {
                 if (!element?.style) return;
                 const previous = fadeMemory.get(element);
-                if (previous) previous.cancel();
+                if (previous) {
+                    // Drop the old animation before cancellation: a patched
+                    // cancel() may throw or synchronously fire callbacks.
+                    fadeMemory.delete(element);
+                    try { previous.cancel(); }
+                    catch (_) { /* a failed cancellation must not block replacement */ }
+                }
                 if (show) new Collection([element]).show();
                 if (!element.animate || duration === 0) {
                     if (!show) new Collection([element]).hide();
