@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.98 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.99 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.98';
+    const VERSION = '0.0.99';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1785,6 +1785,9 @@
                 // A callback may also be registered under other namespaces,
                 // capture modes or AbortSignals on the same element.
                 if (info._record) return this.each((i, element) => {
+                    // Manually assembled collections can contain nulls or
+                    // primitives; only event targets can own registrations.
+                    if (!element || (typeof element !== 'object' && typeof element !== 'function')) return;
                     if ((eventMemory.get(element) || []).includes(info._record))
                         unbindRecord(element, info._record);
                 });
@@ -1797,6 +1800,7 @@
             }
             const tokens = events == null ? null : eventTokens(events);
             return this.each((i, element) => {
+                if (!element || (typeof element !== 'object' && typeof element !== 'function')) return;
                 const records = [...(eventMemory.get(element) || [])];
                 for (const record of records) {
                     if ((!tokens || tokens.some(token => matchesToken(record, token))) &&
