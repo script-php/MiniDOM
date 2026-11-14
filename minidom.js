@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.11 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.12 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.11';
+    const VERSION = '0.0.12';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -810,6 +810,26 @@
                         const key = cssName(name);
                         if (newValue == null) element.style.removeProperty(key);
                         else element.style.setProperty(key, String(newValue));
+                    }
+                });
+            }
+
+            // A declaration list (e.g. "color: red; padding: 8px") merges
+            // into each element's existing inline style. Use the browser's
+            // CSS parser so quoted semicolons, custom properties and
+            // !important are handled correctly.
+            if (typeof property === 'string' && value === undefined && property.includes(':')) {
+                const parsed = global.document.createElement('div').style;
+                parsed.cssText = property;
+                const declarations = [];
+                for (let i = 0; i < parsed.length; i++) {
+                    const name = parsed.item(i);
+                    declarations.push([name, parsed.getPropertyValue(name), parsed.getPropertyPriority(name)]);
+                }
+                return this.each((i, element) => {
+                    if (!element.style) return;
+                    for (const [name, newValue, priority] of declarations) {
+                        element.style.setProperty(name, newValue, priority);
                     }
                 });
             }
