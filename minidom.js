@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.93 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.94 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.93';
+    const VERSION = '0.0.94';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1170,10 +1170,11 @@
 
         addClass(names) {
             return this.each((i, element) => {
+                if (!element?.classList) return;
                 const next = typeof names === 'function'
                     ? names.call(element, i, element.className) : names;
                 const tokens = classes(next);
-                if (element.classList && tokens.length) updateClassTokens(element.classList, tokens, 'add');
+                if (tokens.length) updateClassTokens(element.classList, tokens, 'add');
             });
         }
 
@@ -1182,7 +1183,7 @@
             // element index and its class string before modification.
             const fixedTokens = typeof names === 'function' ? null : classes(names);
             return this.each((i, element) => {
-                if (!element.classList) return;
+                if (!element?.classList) return;
                 const next = typeof names === 'function'
                     ? names.call(element, i, element.className) : null;
                 const tokens = fixedTokens || classes(next);
@@ -1192,7 +1193,7 @@
 
         toggleClass(names, force) {
             return this.each((i, element) => {
-                if (!element.classList) return;
+                if (!element?.classList) return;
                 const next = typeof names === 'function'
                     ? names.call(element, i, element.className, force) : names;
                 for (const token of classes(next)) {
@@ -1204,7 +1205,7 @@
 
         hasClass(name) {
             return this.elements.some(element =>
-                element.classList && element.classList.contains(name)
+                Boolean(element?.classList?.contains(name))
             );
         }
 
