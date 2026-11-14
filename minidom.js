@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.27 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.28 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.27';
+    const VERSION = '0.0.28';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -620,8 +620,17 @@
             for (const item of value) result.push(copyDataValue(item, seen));
             return result;
         }
-        if (value instanceof Date) return new Date(value.getTime());
-        if (value instanceof RegExp) return new RegExp(value.source, value.flags);
+        if (value instanceof Date) {
+            const result = new Date(value.getTime());
+            seen.set(value, result);
+            return result;
+        }
+        if (value instanceof RegExp) {
+            const result = new RegExp(value.source, value.flags);
+            result.lastIndex = value.lastIndex;
+            seen.set(value, result);
+            return result;
+        }
         if (value instanceof Map) {
             const result = new Map();
             seen.set(value, result);
