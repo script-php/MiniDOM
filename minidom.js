@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.35 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.36 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.35';
+    const VERSION = '0.0.36';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1129,9 +1129,10 @@
                     const prepared = next == null ? '' : String(next);
                     const template = element.ownerDocument.createElement('template');
                     template.innerHTML = prepared;
+                    // Parse only once. A second innerHTML assignment could throw
+                    // after cleanup, and would repeat expensive HTML parsing.
                     cleanChildren(element);
-                    // As with .append(), only pass trusted markup here.
-                    element.innerHTML = prepared;
+                    element.replaceChildren(template.content);
                 }
             });
         }
