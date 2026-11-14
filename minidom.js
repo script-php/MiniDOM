@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.99 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.100 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.99';
+    const VERSION = '0.0.100';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -458,7 +458,14 @@
                     event.data = eventData;
                     event.delegateTarget = element;
                     event.handleObj = { type: token.type, selector, handler, namespace: token.namespaces.join('.'), _record: record };
-                    handler.call(context, event);
+                    // Match the conventional jQuery-style `return false` contract:
+                    // cancel the default action and stop bubbling. Other handlers
+                    // on this target still run unless stopImmediatePropagation()
+                    // is explicitly called by the callback.
+                    if (handler.call(context, event) === false) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }
                 };
                 const listenerOptions = capture && !requestedCapture
                     ? { ...(typeof nativeOptions === 'object' && nativeOptions ? nativeOptions : {}), capture: true }
