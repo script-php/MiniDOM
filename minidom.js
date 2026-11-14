@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.9 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.10 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.9';
+    const VERSION = '0.0.10';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -869,6 +869,73 @@
             const num = Number(value);
             if (!Number.isFinite(num)) throw new TypeError('scrollLeft() requires a finite number');
             return this.each((i, element) => scrollOf(element, 'left', num));
+        }
+
+        // Document coordinates, including the current page scroll.
+        offset() {
+            const element = this.get();
+            if (!element || typeof element.getBoundingClientRect !== 'function') return undefined;
+            const rect = element.getBoundingClientRect();
+            return { top: rect.top + global.scrollY, left: rect.left + global.scrollX };
+        }
+
+        // Coordinates relative to the offset parent padding edge.
+        position() {
+            const element = this.get();
+            if (!element || element.nodeType !== 1) return undefined;
+            const style = global.getComputedStyle(element);
+            if (style.position === 'fixed') {
+                const rect = element.getBoundingClientRect();
+                return { top: rect.top - parseFloat(style.marginTop || 0),
+                    left: rect.left - parseFloat(style.marginLeft || 0) };
+            }
+            const parent = element.offsetParent;
+            const rect = element.getBoundingClientRect();
+            const parentRect = parent ? parent.getBoundingClientRect() : { top: 0, left: 0 };
+            return {
+                top: rect.top - parentRect.top - (parent?.clientTop || 0) +
+                    (parent?.scrollTop || 0) - (parseFloat(style.marginTop) || 0),
+                left: rect.left - parentRect.left - (parent?.clientLeft || 0) +
+                    (parent?.scrollLeft || 0) - (parseFloat(style.marginLeft) || 0)
+            };
+        }
+
+        // Whether an element currently occupies rendered layout boxes.
+        // Does not imply it is inside the viewport or unobscured.
+        isVisible() {
+            const element = this.get();
+            if (!element || element.nodeType !== 1 || !element.isConnected) return false;
+            const style = global.getComputedStyle(element);
+            return style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+                element.getClientRects().length > 0;
+        }
+
+        focus(options) {
+            return this.each((i, element) => element.focus?.(options));
+        }
+
+        blur() {
+            return this.each((i, element) => element.blur?.());
+        }
+
+        scrollIntoView(options) {
+            return this.each((i, element) => element.scrollIntoView?.(options));
+        }
+
+        toggle(force) {
+            if (force !== undefined && typeof force !== 'boolean') {
+                throw new TypeError('toggle() requires a boolean or no argument');
+            }
+            return this.each((i, element) => {
+                const wrapper = new Collection([element]);
+                if (force === true) wrapper.show();
+                else if (force === false || wrapper.isVisible()) wrapper.hide();
+                else wrapper.show();
+            });
+        }
+
+        slice(start, end) {
+            return this._push(this.elements.slice(start, end));
         }
 
         // Observe content-box dimensions for each selected HTML/SVG element.
