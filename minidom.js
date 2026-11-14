@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.126 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.127 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.126';
+    const VERSION = '0.0.127';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -753,8 +753,7 @@
 
     function cloneNodeWithState(source, copyState = false, deepState = copyState) {
         const cloned = source.cloneNode(true);
-        // Copy each source node exactly once, including the root. In v0.0.126
-        // the root was accidentally omitted from deep managed-state clones.
+        // Copy each source node exactly once, including the root.
         if (copyState && !deepState) copyManagedState(source, cloned);
         if (copyState && deepState) {
             // Pairwise iterative traversal includes inert template.content trees.
@@ -764,6 +763,13 @@
             while (stack.length) {
                 const [from, to] = stack.pop();
                 copyManagedState(from, to);
+                // cloneNode(true) can include a shadow tree when its host was
+                // created with { clonable: true }. Traverse it only when the
+                // browser actually cloned an accessible open shadow root.
+                // Non-clonable and closed roots remain untouched.
+                if (from.nodeType === 1 && from.shadowRoot && to.shadowRoot) {
+                    stack.push([from.shadowRoot, to.shadowRoot]);
+                }
                 if (from.nodeType === 1 && from.localName === 'template' &&
                     from.namespaceURI === 'http://www.w3.org/1999/xhtml') {
                     const fromFragment = from.content;
