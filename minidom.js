@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.42 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.43 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.42';
+    const VERSION = '0.0.43';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1163,6 +1163,16 @@
                     // them to strings (which would lose their Trusted Types brand).
                     const prepared = next == null ? '' :
                         (global.TrustedHTML && next instanceof global.TrustedHTML ? next : String(next));
+                    // Empty content needs no HTML parser. In particular, a
+                    // Trusted Types CSP must not reject .html(null) / .html(''),
+                    // which only remove existing nodes and never create markup.
+                    const target = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                        ? element.content : element;
+                    if (prepared === '') {
+                        cleanChildren(target);
+                        target.replaceChildren();
+                        return;
+                    }
                     // HTML templates keep inserted scripts inert. For SVG/MathML,
                     // contextual parsing is necessary to preserve namespaces.
                     let fragment;
@@ -1181,8 +1191,6 @@
                         }
                     }
                     // Parsing must succeed before destroying the old subtree.
-                    const target = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
-                        ? element.content : element;
                     cleanChildren(target);
                     target.replaceChildren(fragment);
                 }
