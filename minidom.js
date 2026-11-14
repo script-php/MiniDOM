@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.87 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.88 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.87';
+    const VERSION = '0.0.88';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2055,14 +2055,17 @@
         }
 
         remove() {
-            return this.each((i, element) => {
-                // Document and Window can be selected for events/traversal,
-                // but are not removable DOM nodes. Cleaning a Document would
-                // silently discard listeners and data across the entire page.
-                if (!isNode(element) || element.nodeType === 9) return;
+            // Removing an ancestor already removes its descendants. Avoid
+            // subsequently detaching selected children from the removed tree,
+            // which would unexpectedly alter the caller's detached subtree.
+            // Clean managed state once per top-level removed subtree.
+            const roots = topLevelNodes(this.elements.filter(element =>
+                isNode(element) && element.nodeType !== 9));
+            for (const element of roots) {
                 cleanTree(element);
                 element.parentNode?.removeChild(element);
-            });
+            }
+            return this;
         }
 
         replaceWith(...content) {
