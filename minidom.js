@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.96 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.97 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.96';
+    const VERSION = '0.0.97';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1700,11 +1700,11 @@
         }
 
         blur() {
-            return this.each((i, element) => element.blur?.());
+            return this.each((i, element) => element?.blur?.());
         }
 
         scrollIntoView(options) {
-            return this.each((i, element) => element.scrollIntoView?.(options));
+            return this.each((i, element) => element?.scrollIntoView?.(options));
         }
 
         toggle(force) {
@@ -1732,13 +1732,18 @@
                 throw new TypeError('observeResize() requires a callback function');
             }
             if (!this.length) return this;
-            for (const element of this.elements) {
+            // Validate the complete selection before registering anything, so
+            // an invalid target cannot leave partial subscriptions behind.
+            const elements = [...new Set(this.elements.filter(element => element != null))];
+            for (const element of elements) {
                 if (element.nodeType !== 1) {
                     throw new TypeError('observeResize() requires Element nodes (not window/document)');
                 }
             }
+            if (!elements.length) return this;
             getResizeObserver();
-            return this.each((i, element) => addResizeListener(element, callback));
+            for (const element of elements) addResizeListener(element, callback);
+            return this;
         }
 
         // Without callback, stop all resize subscriptions for the selection.
@@ -1747,7 +1752,12 @@
             if (callback !== undefined && typeof callback !== 'function') {
                 throw new TypeError('unobserveResize() requires a function or no argument');
             }
-            return this.each((i, element) => removeResizeListeners(element, callback));
+            for (const element of new Set(this.elements)) {
+                if (element != null && (typeof element === 'object' || typeof element === 'function')) {
+                    removeResizeListeners(element, callback);
+                }
+            }
+            return this;
         }
 
         // Direct: .on('click', handler[, options])
