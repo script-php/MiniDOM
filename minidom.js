@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.111 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.112 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.111';
+    const VERSION = '0.0.112';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2223,6 +2223,18 @@
                 .filter(parent => parent && parent.parentNode &&
                     parent !== parent.ownerDocument.body &&
                     parent !== parent.ownerDocument.documentElement);
+            // Process nested wrappers from the inside out. This keeps the
+            // operation independent of selection order and avoids moving an
+            // inner wrapper twice before its own children are unwrapped.
+            const selectedParents = new Set(parents);
+            const depth = parent => {
+                let count = 0;
+                for (let ancestor = parent.parentNode; ancestor; ancestor = ancestor.parentNode) {
+                    if (selectedParents.has(ancestor)) count++;
+                }
+                return count;
+            };
+            parents.sort((a, b) => depth(b) - depth(a));
             for (const parent of parents) {
                 const fragment = parent.ownerDocument.createDocumentFragment();
                 while (parent.firstChild) fragment.appendChild(parent.firstChild);
