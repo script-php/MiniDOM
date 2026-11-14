@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.33 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.34 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.33';
+    const VERSION = '0.0.34';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -802,7 +802,24 @@
         if (customPseudo.test(selector)) {
             customPseudo.lastIndex = 0;
             const root = element.getRootNode?.() || global.document;
-            return queryExtended(selector, [root]).includes(element);
+            if (queryExtended(selector, [root]).includes(element)) return true;
+            // querySelectorAll() excludes its root. Detached elements are their
+            // own root, so a compound custom pseudo would otherwise never
+            // match them (e.g. $(detached).is('div:contains(hello)')).
+            // Only evaluate a single selector step locally; combinators and
+            // positional queries spanning multiple nodes retain query semantics.
+            if (root !== element) return false;
+            const groups = selectorPlan(selector);
+            for (const group of groups) {
+                if (group.length !== 1 || group[0].combinator) continue;
+                const { nativeCSS, tests, notEqual } = group[0];
+                if (!element.matches(nativeCSS) || !notEqual.every(([name, value]) =>
+                    element.getAttribute(name) !== value)) continue;
+                let matched = [element];
+                for (const test of tests) matched = applyPseudo(matched, test);
+                if (matched.includes(element)) return true;
+            }
+            return false;
         }
         customPseudo.lastIndex = 0;
         return element.matches(selector);
