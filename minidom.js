@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.101 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.102 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.101';
+    const VERSION = '0.0.102';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2087,16 +2087,29 @@
         }
 
         empty() {
-            return this.each((i, element) => {
-                // Document is a selection root, not a content container to clear.
-                // Removing its children would destroy the entire page and
-                // discard managed listeners attached throughout the document.
-                if (!isNode(element) || element.nodeType === 9 || !element.replaceChildren) return;
-                const target = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+            // A selected descendant must not be emptied a second time after
+            // its ancestor has already removed it. Preserve detached subtree
+            // structure while cleaning managed state from removed children.
+            const eligible = this.elements.filter(element =>
+                isNode(element) && element.nodeType !== 9 && element.replaceChildren);
+            const selected = new Set(eligible);
+            const roots = topLevelNodes(eligible).filter(element => {
+                // HTML template contents live in a DocumentFragment, whose
+                // parentNode is null. Treat its host as an ancestor as well.
+                for (let parent = element.parentNode; parent; parent = parent.parentNode) {
+                    if (parent.nodeType === 11 && [...selected].some(candidate =>
+                        candidate.localName === 'template' && candidate.content === parent)) return false;
+                }
+                return true;
+            });
+            for (const element of roots) {
+                const target = element.localName === 'template' &&
+                    element.namespaceURI === 'http://www.w3.org/1999/xhtml'
                     ? element.content : element;
                 cleanChildren(target);
                 target.replaceChildren();
-            });
+            }
+            return this;
         }
 
         remove() {
