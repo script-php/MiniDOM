@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.38 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.40 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.39';
+    const VERSION = '0.0.40';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -691,10 +691,19 @@
         const cloned = source.cloneNode(true);
         if (copyState) copyManagedState(source, cloned);
         if (deepState) {
-            // A pairwise walk handles elements, text, comments and fragments.
+            // Pairwise iterative traversal includes inert template.content trees.
+            // Native cloneNode(true) clones these fragments, but they are not
+            // exposed through the template element's childNodes collection.
             const stack = [[source, cloned]];
             while (stack.length) {
                 const [from, to] = stack.pop();
+                if (from.nodeType === 1 && from.localName === 'template' &&
+                    from.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+                    const fromFragment = from.content;
+                    const toFragment = to.content;
+                    copyManagedState(fromFragment, toFragment);
+                    stack.push([fromFragment, toFragment]);
+                }
                 for (let i = from.childNodes.length - 1; i >= 0; i--) {
                     const fromChild = from.childNodes[i];
                     const toChild = to.childNodes[i];
