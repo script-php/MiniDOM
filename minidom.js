@@ -1,12 +1,14 @@
-/* MiniDOM v0.0.6 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.7 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.6';
+    const VERSION = '0.0.7';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
     const dataMemory = new WeakMap();
+    const resizeMemory = new WeakMap();
+    let sharedResizeObserver = null;
 
     function isNode(value) {
         return value != null && typeof value.nodeType === 'number';
@@ -196,13 +198,128 @@
         });
     }
 
-    // MiniDOM stores events, data and previous display values in WeakMaps.
+
+    // Measurements return CSS pixel numbers for the first selected item.
+    // Element dimensions use the untransformed CSS box model, excluding
+    // margins except when explicitly requested. For non-rendered elements
+    // (display:none, disconnected), the rendered dimensions are zero.
+    function dimensionOf(target, axis, box = 'content', includeMargin = false) {
+        if (!target) return undefined;
+        if (target === global) return axis === 'width' ? global.innerWidth : global.innerHeight;
+        if (target.nodeType === 9) {
+            const doc = target;
+            const root = doc.documentElement;
+            const body = doc.body;
+            const suffix = axis === 'width' ? 'Width' : 'Height';
+            const values = [doc.defaultView?.['inner' + suffix] || 0];
+            for (const node of [root, body]) {
+                if (!node) continue;
+                values.push(node['scroll' + suffix] || 0,
+                    node['offset' + suffix] || 0, node['client' + suffix] || 0);
+            }
+            return Math.max(...values);
+        }
+        if (target.nodeType !== 1) return undefined;
+
+        const style = global.getComputedStyle(target);
+        if (style.display === 'none' || !target.getClientRects().length) return 0;
+        const horizontal = axis === 'width';
+        const p1 = parseFloat(style[horizontal ? 'paddingLeft' : 'paddingTop']) || 0;
+        const p2 = parseFloat(style[horizontal ? 'paddingRight' : 'paddingBottom']) || 0;
+        const b1 = parseFloat(style[horizontal ? 'borderLeftWidth' : 'borderTopWidth']) || 0;
+        const b2 = parseFloat(style[horizontal ? 'borderRightWidth' : 'borderBottomWidth']) || 0;
+        const padding = p1 + p2;
+        const border = b1 + b2;
+        const cssSize = parseFloat(style[axis]);
+        // Computed width/height are normally resolved layout pixels. Unlike
+        // getBoundingClientRect(), these values are unaffected by transforms.
+        const borderBox = Number.isFinite(cssSize)
+            ? cssSize + (style.boxSizing === 'border-box' ? 0 : padding + border)
+            : (horizontal ? target.getBoundingClientRect().width : target.getBoundingClientRect().height);
+        const content = Math.max(0, borderBox - padding - border);
+        let result = content;
+        if (box === 'inner' || box === 'outer') result += padding;
+        if (box === 'outer') result += border;
+        if (includeMargin) {
+            result += (parseFloat(style[horizontal ? 'marginLeft' : 'marginTop']) || 0)
+                + (parseFloat(style[horizontal ? 'marginRight' : 'marginBottom']) || 0);
+        }
+        return result;
+    }
+
+    function scrollOf(target, axis, value) {
+        if (!target) return undefined;
+        const isDocument = target.nodeType === 9;
+        const view = isDocument ? target.defaultView : target === global ? global : null;
+        const property = axis === 'top' ? 'scrollTop' : 'scrollLeft';
+        const offsetProperty = axis === 'top' ? 'pageYOffset' : 'pageXOffset';
+        const scrollElement = isDocument ? target.scrollingElement || target.documentElement : target;
+        if (value === undefined) {
+            if (view) return view[offsetProperty] || 0;
+            return scrollElement[property];
+        }
+        if (view) {
+            const x = axis === 'left' ? value : view.pageXOffset;
+            const y = axis === 'top' ? value : view.pageYOffset;
+            view.scrollTo(x, y);
+        } else if (property in scrollElement) {
+            scrollElement[property] = value;
+        }
+    }
+
+    // A single native ResizeObserver serves every MiniDOM subscription.
+    // Each target has a Set of callbacks, so registering the same callback
+    // more than once is idempotent. Resize callbacks report content-box size.
+    function getResizeObserver() {
+        if (!global.ResizeObserver) {
+            throw new Error('ResizeObserver is not supported by this browser');
+        }
+        if (!sharedResizeObserver) {
+            sharedResizeObserver = new global.ResizeObserver(entries => {
+                for (const entry of entries) {
+                    const callbacks = resizeMemory.get(entry.target);
+                    if (!callbacks) continue;
+                    for (const callback of [...callbacks]) {
+                        // A callback may unsubscribe itself or another callback.
+                        if (!callbacks.has(callback)) continue;
+                        callback.call(entry.target, entry.contentRect.width,
+                            entry.contentRect.height, entry);
+                    }
+                }
+            });
+        }
+        return sharedResizeObserver;
+    }
+
+    function addResizeListener(element, callback) {
+        let callbacks = resizeMemory.get(element);
+        if (!callbacks) {
+            callbacks = new Set();
+            resizeMemory.set(element, callbacks);
+            getResizeObserver().observe(element);
+        }
+        callbacks.add(callback);
+    }
+
+    function removeResizeListeners(element, callback) {
+        const callbacks = resizeMemory.get(element);
+        if (!callbacks) return;
+        if (callback === undefined) callbacks.clear();
+        else callbacks.delete(callback);
+        if (!callbacks.size) {
+            sharedResizeObserver?.unobserve(element);
+            resizeMemory.delete(element);
+        }
+    }
+
+    // MiniDOM stores events, data, display, and resize listeners in WeakMaps.
     // Detaching a node leaves them intact; destructive removals clean the
     // entire subtree (including text nodes with MiniDOM listeners).
     function cleanNode(node) {
         for (const record of [...(eventMemory.get(node) || [])]) unbindRecord(node, record);
         dataMemory.delete(node);
         displayMemory.delete(node);
+        removeResizeListeners(node);
     }
 
     function cleanTree(node) {
@@ -258,6 +375,10 @@
         if (saved) dataMemory.set(destination, copyDataValue(saved));
         const display = displayMemory.get(source);
         if (display) displayMemory.set(destination, { ...display });
+        const resizeCallbacks = resizeMemory.get(source);
+        if (resizeCallbacks && destination.nodeType === 1) {
+            for (const callback of resizeCallbacks) addResizeListener(destination, callback);
+        }
         for (const record of eventMemory.get(source) || []) {
             bindEvents(new Collection([destination]), record.type, record.selector,
                 record.handler, record.options, record.once);
@@ -590,6 +711,64 @@
                     element.style.removeProperty('display');
                 }
             });
+        }
+
+
+        // Dimension getters use the first matched node and return CSS pixels.
+        // For window: viewport dimensions; for document: full page dimensions.
+        // These are snapshots; use observeResize() to react to element changes.
+        width() { return dimensionOf(this.get(), 'width'); }
+        height() { return dimensionOf(this.get(), 'height'); }
+        innerWidth() { return dimensionOf(this.get(), 'width', 'inner'); }
+        innerHeight() { return dimensionOf(this.get(), 'height', 'inner'); }
+        outerWidth(includeMargin = false) {
+            return dimensionOf(this.get(), 'width', 'outer', Boolean(includeMargin));
+        }
+        outerHeight(includeMargin = false) {
+            return dimensionOf(this.get(), 'height', 'outer', Boolean(includeMargin));
+        }
+
+        // Scroll getters return a number. Setters apply to every matched node
+        // and return the same wrapper for chaining.
+        scrollTop(value) {
+            if (value === undefined) return scrollOf(this.get(), 'top');
+            const num = Number(value);
+            if (!Number.isFinite(num)) throw new TypeError('scrollTop() requires a finite number');
+            return this.each((i, element) => scrollOf(element, 'top', num));
+        }
+
+        scrollLeft(value) {
+            if (value === undefined) return scrollOf(this.get(), 'left');
+            const num = Number(value);
+            if (!Number.isFinite(num)) throw new TypeError('scrollLeft() requires a finite number');
+            return this.each((i, element) => scrollOf(element, 'left', num));
+        }
+
+        // Observe content-box dimensions for each selected HTML/SVG element.
+        // Callback `this` is the element, with (width, height, nativeEntry).
+        // ResizeObserver fires asynchronously, including an initial reading.
+        // Repeating the same callback on one element does not duplicate it.
+        observeResize(callback) {
+            if (typeof callback !== 'function') {
+                throw new TypeError('observeResize() requires a callback function');
+            }
+            if (!this.length) return this;
+            for (const element of this.elements) {
+                if (element.nodeType !== 1) {
+                    throw new TypeError('observeResize() requires Element nodes (not window/document)');
+                }
+            }
+            getResizeObserver();
+            return this.each((i, element) => addResizeListener(element, callback));
+        }
+
+        // Without callback, stop all resize subscriptions for the selection.
+        // Destructive DOM methods automatically unsubscribe descendants.
+        unobserveResize(callback) {
+            if (callback !== undefined && typeof callback !== 'function') {
+                throw new TypeError('unobserveResize() requires a function or no argument');
+            }
+            return this.each((i, element) => removeResizeListeners(element, callback));
         }
 
         // Direct: .on('click', handler[, options])
