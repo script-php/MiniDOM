@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.26 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.27 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.26';
+    const VERSION = '0.0.27';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -552,9 +552,11 @@
     function addResizeListener(element, callback) {
         let callbacks = resizeMemory.get(element);
         if (!callbacks) {
+            // Observe before publishing state: if observe() throws, a later
+            // registration must not mistake this target for subscribed.
+            getResizeObserver().observe(element);
             callbacks = new Set();
             resizeMemory.set(element, callbacks);
-            getResizeObserver().observe(element);
         }
         callbacks.add(callback);
     }
@@ -1330,9 +1332,11 @@
             return this.each((i, root) => {
                 if (!root?.nodeType) return;
                 let entries = mutationMemory.get(root);
-                if (!entries) { entries = new Map(); mutationMemory.set(root, entries); }
-                if (entries.has(callback)) return;
+                if (entries?.has(callback)) return;
                 const observer = new global.MutationObserver(records => {
+                    // A queued notification may outlive explicit unsubscribe
+                    // or destructive removal. Never deliver stale callbacks.
+                    if (mutationMemory.get(root)?.get(callback) !== observer) return;
                     const added = [], removed = [];
                     for (const record of records) {
                         for (const node of record.addedNodes) added.push(node);
@@ -1340,9 +1344,12 @@
                     }
                     callback.call(root, { added, removed, records, root });
                 });
+                // Native observe() validates options and may throw. Only save
+                // a subscription once observation actually succeeds.
                 observer.observe(root, {
                     childList: true, subtree: true, ...options
                 });
+                if (!entries) { entries = new Map(); mutationMemory.set(root, entries); }
                 entries.set(callback, observer);
             });
         }
