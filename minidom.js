@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.7 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.8 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.7';
+    const VERSION = '0.0.8';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -16,6 +16,16 @@
 
     // One pass: remove duplicates while keeping the first-seen order.
     function unique(items) {
+        // Most chained operations produce zero or one node. Avoid allocating a
+        // Set in that common case, but retain full deduplication otherwise.
+        if (items.length === 0) return [];
+        if (items.length === 1) {
+            const only = items[0];
+            return only == null ? [] : [only];
+        }
+        // Native NodeLists never contain the same DOM node twice; copy them
+        // directly rather than allocate a Set for every CSS selection.
+        if (global.NodeList && items instanceof global.NodeList) return Array.from(items);
         const result = [];
         const seen = new Set();
         for (const item of items) {
@@ -432,6 +442,12 @@
                 : Boolean(target.append && target.prepend)
         );
         const inserted = [];
+        // Avoid creating a DocumentFragment for the most common case: one
+        // destination and one source node. The native insertion moves the node.
+        if (targets.length === 1 && source.length === 1) {
+            targets[0][position](source[0]);
+            return [source[0]];
+        }
         targets.forEach((target, index) => {
             const copies = index === targets.length - 1
                 ? source
@@ -489,27 +505,44 @@
         end() { return this.previous || new Collection([]); }
 
         find(selector) {
-            return this._push(this.elements.flatMap(element =>
-                typeof element.querySelectorAll === 'function'
-                    ? [...element.querySelectorAll(selector)] : []
-            ));
+            // Collect directly instead of creating an array per root via
+            // flatMap + spread. _push() still removes overlapping duplicates.
+            const found = [];
+            for (const element of this.elements) {
+                if (typeof element.querySelectorAll !== 'function') continue;
+                for (const child of element.querySelectorAll(selector)) found.push(child);
+            }
+            return this._push(found);
         }
 
         parent(selector) {
-            return this._push(this.elements.map(element => element.parentElement)
-                .filter(element => !selector || element?.matches(selector)));
+            const found = [];
+            for (const element of this.elements) {
+                const parent = element.parentElement;
+                if (parent && (!selector || parent.matches(selector))) found.push(parent);
+            }
+            return this._push(found);
         }
 
         children(selector) {
-            return this._push(this.elements.flatMap(element =>
-                element.children ? [...element.children] : []
-            ).filter(element => !selector || element.matches(selector)));
+            const found = [];
+            for (const element of this.elements) {
+                if (!element.children) continue;
+                for (const child of element.children) {
+                    if (!selector || child.matches(selector)) found.push(child);
+                }
+            }
+            return this._push(found);
         }
 
         closest(selector) {
-            return this._push(this.elements.map(element =>
-                typeof element.closest === 'function' ? element.closest(selector) : null
-            ));
+            const found = [];
+            for (const element of this.elements) {
+                if (typeof element.closest !== 'function') continue;
+                const match = element.closest(selector);
+                if (match) found.push(match);
+            }
+            return this._push(found);
         }
 
         filter(selector) {
@@ -531,22 +564,43 @@
 
         siblings(selector) {
             const matches = selector === undefined ? null : matcher(selector);
-            return this._push(this.elements.flatMap(element =>
-                element.parentElement ? [...element.parentElement.children]
-                    .filter(sibling => sibling !== element) : []
-            ).filter((element, index) => !matches || matches(element, index)));
+            const found = [];
+            let index = 0;
+            for (const element of this.elements) {
+                if (!element.parentElement) continue;
+                for (const sibling of element.parentElement.children) {
+                    if (sibling === element) continue;
+                    if (!matches || matches(sibling, index)) found.push(sibling);
+                    index++;
+                }
+            }
+            return this._push(found);
         }
 
         next(selector) {
             const matches = selector === undefined ? null : matcher(selector);
-            return this._push(this.elements.map(element => element.nextElementSibling)
-                .filter(Boolean).filter((element, index) => !matches || matches(element, index)));
+            const found = [];
+            let index = 0;
+            for (const element of this.elements) {
+                const sibling = element.nextElementSibling;
+                if (!sibling) continue;
+                if (!matches || matches(sibling, index)) found.push(sibling);
+                index++;
+            }
+            return this._push(found);
         }
 
         prev(selector) {
             const matches = selector === undefined ? null : matcher(selector);
-            return this._push(this.elements.map(element => element.previousElementSibling)
-                .filter(Boolean).filter((element, index) => !matches || matches(element, index)));
+            const found = [];
+            let index = 0;
+            for (const element of this.elements) {
+                const sibling = element.previousElementSibling;
+                if (!sibling) continue;
+                if (!matches || matches(sibling, index)) found.push(sibling);
+                index++;
+            }
+            return this._push(found);
         }
 
         addClass(names) {
