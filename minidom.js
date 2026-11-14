@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.86 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.87 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.86';
+    const VERSION = '0.0.87';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1984,17 +1984,11 @@
             return this._push(inserted);
         }
         wrapAll(content) {
-            const candidates = this.elements.filter(element => element.parentNode && element.nodeType === 1);
-            // A selected ancestor already carries its selected descendants.
-            // Moving both would flatten the original tree; if a descendant
-            // comes first, it can even create an illegal ancestor cycle.
-            const selected = new Set(candidates);
-            const elements = candidates.filter(element => {
-                for (let parent = element.parentNode; parent; parent = parent.parentNode) {
-                    if (selected.has(parent)) return false;
-                }
-                return true;
-            });
+            // Deduplicate selections and keep only top-level elements. A
+            // repeated element must not be moved to the end of its own
+            // wrapper, and a selected descendant travels with its ancestor.
+            const elements = topLevelNodes(this.elements.filter(element =>
+                element && element.nodeType === 1 && element.parentNode));
             const template = contentNodes(content).find(node => node.nodeType === 1);
             if (!elements.length || !template) return this;
             const wrapper = cloneNodeWithState(template, true);
