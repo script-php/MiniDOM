@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.58 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.59 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.58';
+    const VERSION = '0.0.59';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
