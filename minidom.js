@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.40 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.41 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.40';
+    const VERSION = '0.0.41';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -767,10 +767,16 @@
         const validTargets = targets.filter(target => !source.some(node =>
             node === target || (node.contains && node.contains(target))));
         if (!validTargets.length) return inserted;
+        // HTML templates store children in .content, not their own childNodes.
+        const insertionTarget = target =>
+            (position === 'append' || position === 'prepend') &&
+            target.nodeType === 1 && target.localName === 'template' &&
+            target.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                ? target.content : target;
         // Avoid creating a DocumentFragment for the most common case: one
         // destination and one source node. The native insertion moves the node.
         if (validTargets.length === 1 && source.length === 1) {
-            validTargets[0][position](source[0]);
+            insertionTarget(validTargets[0])[position](source[0]);
             return [source[0]];
         }
         validTargets.forEach((target, index) => {
@@ -780,7 +786,7 @@
             if (!copies.length) return;
             const fragment = global.document.createDocumentFragment();
             for (const copy of copies) fragment.appendChild(copy);
-            target[position](fragment);
+            insertionTarget(target)[position](fragment);
             for (const copy of copies) inserted.push(copy);
         });
         return inserted;
