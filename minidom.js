@@ -1,11 +1,12 @@
-/* MiniDOM v0.0.2 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.3 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.2';
+    const VERSION = '0.0.3';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
+    const dataMemory = new WeakMap();
 
     function isNode(value) {
         return value != null && typeof value.nodeType === 'number';
@@ -53,6 +54,102 @@
 
     function splitEvents(events) {
         return String(events).trim().split(/\s+/).filter(Boolean);
+    }
+
+    // DOM-ready callbacks are also supported when this file is loaded after
+    // DOMContentLoaded. The ready callback receives the MiniDOM function.
+    function ready(callback) {
+        if (typeof callback !== 'function') throw new TypeError('ready() requires a callback');
+        const run = () => callback.call(global.document, MiniDOM);
+        if (global.document.readyState === 'loading') {
+            global.document.addEventListener('DOMContentLoaded', run, { once: true });
+        } else {
+            // Keep ready callbacks asynchronous when the DOM is already ready.
+            global.queueMicrotask(run);
+        }
+    }
+
+    function dataKey(key) {
+        return String(key).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    }
+
+    function dataAttr(key) {
+        return 'data-' + key.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
+    }
+
+    function parseData(value) {
+        if (value === 'true') return true;
+        if (value === 'false') return false;
+        if (value === 'null') return null;
+        if (value !== '' && String(Number(value)) === value) return Number(value);
+        if (/^[\[{]/.test(value)) {
+            try { return JSON.parse(value); } catch (_) { /* leave string unchanged */ }
+        }
+        return value;
+    }
+
+    function cachedData(element) {
+        let cache = dataMemory.get(element);
+        if (!cache) {
+            cache = Object.create(null);
+            dataMemory.set(element, cache);
+        }
+        return cache;
+    }
+
+    function readData(element, key) {
+        if (!element) return undefined;
+        const cache = cachedData(element);
+        const normalized = dataKey(key);
+        if (Object.hasOwn(cache, normalized)) return cache[normalized];
+        if (!element.getAttribute) return undefined;
+        const attr = element.getAttribute(dataAttr(normalized));
+        if (attr === null) return undefined;
+        return (cache[normalized] = parseData(attr));
+    }
+
+    function unbindRecord(element, record) {
+        element.removeEventListener(record.type, record.wrapped, record.options);
+        const records = eventMemory.get(element);
+        if (!records) return;
+        const index = records.indexOf(record);
+        if (index !== -1) records.splice(index, 1);
+        if (!records.length) eventMemory.delete(element);
+    }
+
+    function bindEvents(collection, events, selector, handler, options, once) {
+        // .on('click', fn, options) or .on('click', '.child', fn, options)
+        if (typeof selector === 'function') {
+            options = handler;
+            handler = selector;
+            selector = null;
+        }
+        if (typeof handler !== 'function') throw new TypeError('Event handler must be a function');
+        const types = splitEvents(events);
+        return collection.each((i, element) => {
+            if (!element.addEventListener) return;
+            const records = eventMemory.get(element) || [];
+            for (const type of types) {
+                const record = { type, selector, handler, options, wrapped: null };
+                record.wrapped = function (event) {
+                    let context = element;
+                    if (selector !== null) {
+                        const target = event.target?.nodeType === 1
+                            ? event.target : event.target?.parentElement;
+                        const match = target?.closest(selector);
+                        // Delegation applies to descendants, never the root itself.
+                        if (!match || match === element || !element.contains?.(match)) return;
+                        context = match;
+                    }
+                    // Remove before invoking, so reentrant triggers still run once.
+                    if (once) unbindRecord(element, record);
+                    handler.call(context, event);
+                };
+                element.addEventListener(type, record.wrapped, options);
+                records.push(record);
+            }
+            eventMemory.set(element, records);
+        });
     }
 
     // An insertion accepts HTML/text, native nodes, MiniDOM selections, and
@@ -320,37 +417,19 @@
             });
         }
 
-        // Direct:   $(...).on('click', handler)
-        // Delegated: $(...).on('click', '.child', handler)
+        // Direct: .on('click', handler[, options])
+        // Delegated: .on('click', '.child', handler[, options])
         on(events, selector, handler, options) {
-            if (typeof selector === 'function') {
-                options = handler;
-                handler = selector;
-                selector = null;
-            }
-            if (typeof handler !== 'function') throw new TypeError('on() requires a handler');
-
-            return this.each((i, element) => {
-                if (!element.addEventListener) return;
-                const records = eventMemory.get(element) || [];
-                for (const type of splitEvents(events)) {
-                    const wrapped = selector ? function (event) {
-                        const target = event.target?.nodeType === 1
-                            ? event.target : event.target?.parentElement;
-                        const matched = target?.closest(selector);
-                        if (matched && (matched === element || element.contains?.(matched))) {
-                            handler.call(matched, event);
-                        }
-                    } : handler;
-                    element.addEventListener(type, wrapped, options);
-                    records.push({ type, selector, handler, wrapped, options });
-                }
-                eventMemory.set(element, records);
-            });
+            return bindEvents(this, events, selector, handler, options, false);
         }
 
-        // Removes only handlers registered by MiniDOM.
-        // off() / off('click') / off('click', handler) / off('click', '.child', handler)
+        // Like on(), but removes the listener after its first matching event.
+        one(events, selector, handler, options) {
+            return bindEvents(this, events, selector, handler, options, true);
+        }
+
+        // Removes MiniDOM listeners only; supports off(), off(types, handler),
+        // off(types, selector, handler) and space-separated event names.
         off(events, selector, handler) {
             if (typeof selector === 'function') {
                 handler = selector;
@@ -358,17 +437,86 @@
             }
             const types = events == null ? null : splitEvents(events);
             return this.each((i, element) => {
-                const records = eventMemory.get(element) || [];
-                const remaining = [];
+                const records = [...(eventMemory.get(element) || [])];
                 for (const record of records) {
-                    const match = (!types || types.includes(record.type)) &&
+                    if ((!types || types.includes(record.type)) &&
                         (selector === undefined || selector === record.selector) &&
-                        (handler === undefined || handler === record.handler);
-                    if (match) element.removeEventListener(record.type, record.wrapped, record.options);
-                    else remaining.push(record);
+                        (handler === undefined || handler === record.handler)) {
+                        unbindRecord(element, record);
+                    }
                 }
-                if (remaining.length) eventMemory.set(element, remaining);
-                else eventMemory.delete(element);
+            });
+        }
+
+        // Dispatch bubbling, cancelable DOM events (not native browser actions).
+        // CustomEvent.detail is populated only when detail is supplied.
+        trigger(events, detail) {
+            return this.each((i, element) => {
+                if (!element.dispatchEvent) return;
+                for (const type of splitEvents(events)) {
+                    const options = { bubbles: true, cancelable: true };
+                    const event = detail === undefined
+                        ? new global.Event(type, options)
+                        : new global.CustomEvent(type, { ...options, detail });
+                    element.dispatchEvent(event);
+                }
+            });
+        }
+
+        ready(callback) {
+            ready(callback);
+            return this;
+        }
+
+        // Properties are native JS values, unlike string-only attributes.
+        prop(name, value) {
+            if (name && typeof name === 'object') {
+                return this.each((i, element) => {
+                    for (const [key, val] of Object.entries(name)) element[key] = val;
+                });
+            }
+            if (value === undefined) return this.get()?.[name];
+            return this.each((i, element) => { element[name] = value; });
+        }
+
+        // .data(key) reads a cached value or parses a data-* attribute.
+        // .data(key, value) stores in memory without changing the DOM attribute.
+        data(key, value) {
+            if (key === undefined) {
+                const element = this.get();
+                if (!element) return undefined;
+                const result = Object.create(null);
+                for (const attr of element.attributes || []) {
+                    if (attr.name.startsWith('data-')) {
+                        const name = dataKey(attr.name.slice(5));
+                        result[name] = readData(element, name);
+                    }
+                }
+                return Object.assign(result, dataMemory.get(element) || {});
+            }
+            if (key !== null && typeof key === 'object') {
+                return this.each((i, element) => {
+                    const cache = cachedData(element);
+                    for (const [name, val] of Object.entries(key)) cache[dataKey(name)] = val;
+                });
+            }
+            if (value === undefined) return readData(this.get(), key);
+            return this.each((i, element) => {
+                cachedData(element)[dataKey(key)] = value;
+            });
+        }
+
+        removeData(key) {
+            return this.each((i, element) => {
+                if (key === undefined) {
+                    dataMemory.delete(element);
+                } else {
+                    const cache = dataMemory.get(element);
+                    if (!cache) return;
+                    for (const name of String(key).trim().split(/\s+/).filter(Boolean)) {
+                        delete cache[dataKey(name)];
+                    }
+                }
             });
         }
 
@@ -421,6 +569,10 @@
     }
 
     function MiniDOM(selector, context) {
+        if (typeof selector === 'function') {
+            ready(selector);
+            return new Collection([global.document]);
+        }
         return new Collection(select(selector, context));
     }
 
