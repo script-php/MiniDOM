@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.46 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.47 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.46';
+    const VERSION = '0.0.47';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -620,7 +620,15 @@
     }
 
     function cleanChildren(node) {
-        for (const child of [...(node.childNodes || [])]) cleanTree(child);
+        // Walk existing siblings directly instead of allocating an array of
+        // every child. Save the next sibling before invoking cleanup so a
+        // user-supplied animation cancellation cannot interrupt traversal.
+        let child = node.firstChild;
+        while (child) {
+            const next = child.nextSibling;
+            cleanTree(child);
+            child = next;
+        }
     }
 
     // Copy user data without accidentally sharing ordinary nested objects.
