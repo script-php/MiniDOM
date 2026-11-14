@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.88 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.89 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.88';
+    const VERSION = '0.0.89';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2001,7 +2001,12 @@
         wrapInner(content) {
             const template = contentNodes(content).find(node => node.nodeType === 1);
             if (!template) return this;
+            // A repeated destination should not receive another wrapper.
+            // Keep the first occurrence's index and preserve collection chaining.
+            const seen = new Set();
             return this.each((i, element) => {
+                if (seen.has(element)) return;
+                seen.add(element);
                 const wrapper = cloneNodeWithState(template, true);
                 let deepest = wrapper;
                 while (deepest.firstElementChild) deepest = deepest.firstElementChild;
@@ -2092,8 +2097,12 @@
         wrap(content) {
             const template = contentNodes(content).find(node => node.nodeType === 1);
             if (!template) return this;
+            // Wrap each distinct element once, even if the collection repeats it.
+            const seen = new Set();
             return this.each((i, element) => {
-                if (!element.parentNode || element.nodeType !== 1) return;
+                if (seen.has(element)) return;
+                seen.add(element);
+                if (!element || !element.parentNode || element.nodeType !== 1) return;
                 const outer = cloneNodeWithState(template, true);
                 element.parentNode.insertBefore(outer, element);
                 let inner = outer;
