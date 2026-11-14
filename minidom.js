@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.122 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.123 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.122';
+    const VERSION = '0.0.123';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -749,7 +749,9 @@
 
     function cloneNodeWithState(source, copyState = false, deepState = copyState) {
         const cloned = source.cloneNode(true);
-        if (copyState) copyManagedState(source, cloned);
+        // Deep traversal includes the root itself. Copy it only once: copying
+        // here and again inside the loop registers duplicate event listeners.
+        if (copyState && !deepState) copyManagedState(source, cloned);
         if (deepState) {
             // Pairwise iterative traversal includes inert template.content trees.
             // Native cloneNode(true) clones these fragments, but they are not
