@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.47 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.48 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.47';
+    const VERSION = '0.0.48';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -266,6 +266,16 @@
 
     function classes(value) {
         return String(value).trim().split(/\s+/).filter(Boolean);
+    }
+
+    // DOMTokenList.add/remove are variadic. Passing very large token lists
+    // with spread can exceed the engine's argument limit. Use bounded batches.
+    function updateClassTokens(classList, tokens, operation) {
+        const batchSize = 256;
+        for (let start = 0; start < tokens.length; start += batchSize) {
+            const batch = tokens.slice(start, start + batchSize);
+            classList[operation](...batch);
+        }
     }
 
     function cssName(name) {
@@ -1117,14 +1127,14 @@
                 const next = typeof names === 'function'
                     ? names.call(element, i, element.className) : names;
                 const tokens = classes(next);
-                if (element.classList && tokens.length) element.classList.add(...tokens);
+                if (element.classList && tokens.length) updateClassTokens(element.classList, tokens, 'add');
             });
         }
 
         removeClass(names) {
             const tokens = classes(names);
             return this.each((i, element) => {
-                if (element.classList && tokens.length) element.classList.remove(...tokens);
+                if (element.classList && tokens.length) updateClassTokens(element.classList, tokens, 'remove');
             });
         }
 
