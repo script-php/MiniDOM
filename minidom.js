@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.66 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.67 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.66';
+    const VERSION = '0.0.67';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -787,6 +787,11 @@
     // For multiple destinations: clone for all but the final destination;
     // move original source nodes into the last. Preserve insertion order.
     function insertNodes(destinations, source, position) {
+        // A descendant selected alongside its ancestor already travels with
+        // that ancestor. Moving it separately would flatten the DOM tree.
+        // Preserve the original order of the remaining top-level sources.
+        source = unique(source).filter(node => !source.some(other =>
+            other !== node && other.contains && other.contains(node)));
         const targets = unique(Array.from(destinations)).filter(target =>
             (position === 'before' || position === 'after')
                 ? Boolean(target.parentNode && target.before && target.after)
