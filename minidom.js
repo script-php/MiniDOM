@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.95 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.96 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.95';
+    const VERSION = '0.0.96';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -867,6 +867,7 @@
     // Compile once per traversal, not once per element. For a node-list or
     // Collection selector this avoids materializing the same list N times.
     function selectorMatch(element, selector) {
+        if (element == null) return false;
         if (typeof selector !== 'string') return false;
         if (selector === ':input') return element.matches?.('input,select,textarea,button') || false;
         if (selector === ':header') return element.matches?.('h1,h2,h3,h4,h5,h6') || false;
@@ -978,7 +979,7 @@
             if (typeof selector !== 'string') {
                 const targets = nodes(selector);
                 return this._push(targets.filter(target => this.elements.some(root =>
-                    root !== target && root.contains?.(target))));
+                    root !== target && root?.contains?.(target))));
             }
             return this._push(queryExtended(selector, this.elements));
         }
@@ -1120,7 +1121,7 @@
             }
             const targets = nodes(selector);
             return this._push(this.elements.filter(element =>
-                typeof element.contains === 'function' &&
+                typeof element?.contains === 'function' &&
                 targets.some(child => child !== element && element.contains(child))
             ));
         }
