@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.116 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.117 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.116';
+    const VERSION = '0.0.117';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -600,8 +600,11 @@
         if (callback === undefined) callbacks.clear();
         else callbacks.delete(callback);
         if (!callbacks.size) {
-            sharedResizeObserver?.unobserve(element);
+            // Clear the registration before invoking a possibly patched
+            // observer, so failures cannot retain callbacks or block cleanup.
             resizeMemory.delete(element);
+            try { sharedResizeObserver?.unobserve(element); }
+            catch (_) { /* cleanup is best effort */ }
         }
     }
 
@@ -620,8 +623,13 @@
         removeResizeListeners(node);
         const observers = mutationMemory.get(node);
         if (observers) {
-            for (const observer of observers.values()) observer.disconnect();
+            // Delete first: queued callbacks must see the subscription as
+            // removed, even if a custom disconnect() implementation throws.
             mutationMemory.delete(node);
+            for (const observer of observers.values()) {
+                try { observer.disconnect(); }
+                catch (_) { /* continue cleaning remaining resources */ }
+            }
         }
         const animation = fadeMemory.get(node);
         if (animation) {
@@ -1672,8 +1680,9 @@
                 if (!entries) return;
                 for (const [fn, observer] of entries) {
                     if (callback === undefined || callback === fn) {
-                        observer.disconnect();
                         entries.delete(fn);
+                        try { observer.disconnect(); }
+                        catch (_) { /* do not retain a stale subscription */ }
                     }
                 }
                 if (!entries.size) mutationMemory.delete(root);
