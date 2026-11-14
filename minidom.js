@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.62 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.63 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.62';
+    const VERSION = '0.0.63';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -596,7 +596,12 @@
     // Detaching a node leaves them intact; destructive removals clean the
     // entire subtree (including text nodes with MiniDOM listeners).
     function cleanNode(node) {
-        for (const record of [...(eventMemory.get(node) || [])]) unbindRecord(node, record);
+        const records = eventMemory.get(node);
+        // Most DOM nodes have no MiniDOM listeners. Avoid allocating an
+        // empty snapshot array for every node during destructive cleanup.
+        if (records && records.length) {
+            for (const record of [...records]) unbindRecord(node, record);
+        }
         dataMemory.delete(node);
         displayMemory.delete(node);
         removeResizeListeners(node);
