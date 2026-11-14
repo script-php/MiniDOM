@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.10 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.11 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.10';
+    const VERSION = '0.0.11';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -193,8 +193,22 @@
         if (!records.length) eventMemory.delete(element);
     }
 
+    function eventTokens(events) {
+        return splitEvents(events).map(token => {
+            const parts = token.split('.');
+            const type = parts.shift();
+            const namespaces = [...new Set(parts.filter(Boolean))].sort();
+            if (!type && !namespaces.length) throw new TypeError('Invalid event name');
+            return { type, namespaces };
+        });
+    }
+
+    function matchesToken(record, token) {
+        return (!token.type || record.type === token.type) &&
+            token.namespaces.every(name => record.namespaces.includes(name));
+    }
+
     function bindEvents(collection, events, selector, handler, options, once) {
-        // .on('click', fn, options) or .on('click', '.child', fn, options)
         if (typeof selector === 'function') {
             options = handler;
             handler = selector;
@@ -202,22 +216,30 @@
         }
         if (typeof handler !== 'function') throw new TypeError('Event handler must be a function');
         if (selector == null) selector = null;
-        if (selector != null && typeof selector !== 'string') {
+        if (selector !== null && typeof selector !== 'string') {
             throw new TypeError('Delegation selector must be a CSS selector string');
         }
-        const types = splitEvents(events);
+        const tokens = eventTokens(events);
+        if (tokens.some(token => !token.type)) throw new TypeError('Binding requires an event type');
         const signal = options && typeof options === 'object' ? options.signal : null;
         const removeOnce = once || Boolean(options && typeof options === 'object' && options.once);
-        // Handle `once` ourselves to keep bookkeeping in sync with native listeners.
-        const nativeOptions = options && typeof options === 'object' && options.once
-            ? { ...options, once: false }
-            : options;
+        const nativeOptions = options && typeof options === 'object'
+            ? { ...options, once: false } : options;
+        const capture = typeof nativeOptions === 'boolean' ? nativeOptions : Boolean(nativeOptions?.capture);
 
         return collection.each((i, element) => {
             if (!element.addEventListener || signal?.aborted) return;
-            for (const type of types) {
+            for (const token of tokens) {
+                const records = eventMemory.get(element) || [];
+                // The same callback, selector, type, namespaces and capture mode
+                // is registered only once on an element.
+                if (records.some(record =>
+                    record.type === token.type && record.handler === handler &&
+                    record.selector === selector && record.capture === capture &&
+                    record.namespaces.join('.') === token.namespaces.join('.'))) continue;
                 const record = {
-                    type, selector, handler, options: nativeOptions, once: removeOnce,
+                    type: token.type, namespaces: token.namespaces, selector, handler,
+                    options: nativeOptions, capture, once: removeOnce,
                     wrapped: null, signal, abortHandler: null
                 };
                 record.wrapped = function (event) {
@@ -226,20 +248,15 @@
                         const target = event.target?.nodeType === 1
                             ? event.target : event.target?.parentElement;
                         const match = target?.closest(selector);
-                        // Delegation applies to descendants, never the root itself.
                         if (!match || match === element || !element.contains?.(match)) return;
                         context = match;
                     }
-                    // Remove before invoking, so reentrant triggers still run once.
                     if (removeOnce) unbindRecord(element, record);
                     handler.call(context, event);
                 };
-                element.addEventListener(type, record.wrapped, nativeOptions);
-                const records = eventMemory.get(element) || [];
+                element.addEventListener(token.type, record.wrapped, nativeOptions);
                 records.push(record);
                 eventMemory.set(element, records);
-
-                // Native AbortSignal removal does not notify our event registry.
                 if (signal) {
                     record.abortHandler = () => unbindRecord(element, record);
                     signal.addEventListener('abort', record.abortHandler, { once: true });
@@ -431,7 +448,7 @@
             for (const callback of resizeCallbacks) addResizeListener(destination, callback);
         }
         for (const record of eventMemory.get(source) || []) {
-            bindEvents(new Collection([destination]), record.type, record.selector,
+            bindEvents(new Collection([destination]), [record.type, ...record.namespaces].join('.'), record.selector,
                 record.handler, record.options, record.once);
         }
     }
@@ -976,18 +993,19 @@
             return bindEvents(this, events, selector, handler, options, true);
         }
 
-        // Removes MiniDOM listeners only; supports off(), off(types, handler),
-        // off(types, selector, handler) and space-separated event names.
+        // .off('.posts') removes only namespaced listeners.
+        // Repeated .on() registrations with the same callback/selector/type/
+        // namespace/capture are automatically deduplicated.
         off(events, selector, handler) {
             if (typeof selector === 'function') {
                 handler = selector;
                 selector = undefined;
             }
-            const types = events == null ? null : splitEvents(events);
+            const tokens = events == null ? null : eventTokens(events);
             return this.each((i, element) => {
                 const records = [...(eventMemory.get(element) || [])];
                 for (const record of records) {
-                    if ((!types || types.includes(record.type)) &&
+                    if ((!tokens || tokens.some(token => matchesToken(record, token))) &&
                         (selector === undefined || selector === record.selector) &&
                         (handler === undefined || handler === record.handler)) {
                         unbindRecord(element, record);
@@ -996,16 +1014,20 @@
             });
         }
 
-        // Dispatch bubbling, cancelable DOM events (not native browser actions).
-        // CustomEvent.detail is populated only when detail is supplied.
+        // Dispatch native bubbling events. Namespaces on trigger() are
+        // deliberately not supported: use the base event type.
         trigger(events, detail) {
+            const tokens = eventTokens(events);
+            if (tokens.some(token => !token.type || token.namespaces.length)) {
+                throw new TypeError('trigger() requires unnamespaced event types');
+            }
             return this.each((i, element) => {
                 if (!element.dispatchEvent) return;
-                for (const type of splitEvents(events)) {
+                for (const token of tokens) {
                     const options = { bubbles: true, cancelable: true };
                     const event = detail === undefined
-                        ? new global.Event(type, options)
-                        : new global.CustomEvent(type, { ...options, detail });
+                        ? new global.Event(token.type, options)
+                        : new global.CustomEvent(token.type, { ...options, detail });
                     element.dispatchEvent(event);
                 }
             });
