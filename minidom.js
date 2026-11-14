@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.25 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.26 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.25';
+    const VERSION = '0.0.26';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1723,7 +1723,7 @@
             elements[0].before(wrapper);
             let deepest = wrapper;
             while (deepest.firstElementChild) deepest = deepest.firstElementChild;
-            deepest.append(...elements);
+            for (const element of elements) deepest.appendChild(element);
             return this;
         }
         wrapInner(content) {
@@ -1733,7 +1733,7 @@
                 const wrapper = cloneNodeWithState(template, true);
                 let deepest = wrapper;
                 while (deepest.firstElementChild) deepest = deepest.firstElementChild;
-                deepest.append(...[...element.childNodes]);
+                while (element.firstChild) deepest.appendChild(element.firstChild);
                 element.append(wrapper);
             });
         }
@@ -1810,7 +1810,9 @@
                 .filter(parent => parent && parent.parentNode &&
                     parent !== global.document.body && parent !== global.document.documentElement);
             for (const parent of parents) {
-                parent.replaceWith(...[...parent.childNodes]);
+                const fragment = parent.ownerDocument.createDocumentFragment();
+                while (parent.firstChild) fragment.appendChild(parent.firstChild);
+                parent.replaceWith(fragment);
                 cleanNode(parent);
             }
             return this;
