@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.91 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.92 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.91';
+    const VERSION = '0.0.92';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1892,18 +1892,21 @@
             }
             if (key !== null && typeof key === 'object') {
                 return this.each((i, element) => {
+                    if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return;
                     const cache = cachedData(element);
                     for (const [name, val] of Object.entries(key)) cache[dataKey(name)] = val;
                 });
             }
             if (value === undefined) return readData(this.get(), key);
             return this.each((i, element) => {
+                if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return;
                 cachedData(element)[dataKey(key)] = value;
             });
         }
 
         removeData(key) {
             return this.each((i, element) => {
+                if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return;
                 if (key === undefined) {
                     dataMemory.delete(element);
                 } else {
