@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.73 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.86 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.73';
+    const VERSION = '0.0.86';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2037,7 +2037,14 @@
 
         // Detach preserves MiniDOM state. Append/prepend can reattach later.
         detach() {
-            return this.each((i, element) => element.parentNode?.removeChild(element));
+            // A collection may contain both an ancestor and its descendants.
+            // Detaching each entry independently would pull children out of the
+            // detached parent. Move only the top-level selected nodes; keep
+            // the original collection and all managed state intact.
+            for (const element of topLevelNodes(this.elements.filter(isNode))) {
+                if (element.nodeType !== 9) element.parentNode?.removeChild(element);
+            }
+            return this;
         }
 
         empty() {
