@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.43 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.44 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.43';
+    const VERSION = '0.0.44';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -729,7 +729,12 @@
             const item = frame.value;
             if (frame.exit) { active.delete(item); continue; }
             if (item == null) continue;
-            if (typeof item === 'string') {
+            if (typeof item === 'string' ||
+                (global.TrustedHTML && item instanceof global.TrustedHTML)) {
+                // Empty strings are no-ops, and must not reach an HTML sink:
+                // enforced Trusted Types CSP rejects even template.innerHTML = ''.
+                if (item === '') continue;
+                // Keep the TrustedHTML brand intact when a policy supplied it.
                 const template = global.document.createElement('template');
                 template.innerHTML = item;
                 for (const child of template.content.childNodes) result.push(child);
