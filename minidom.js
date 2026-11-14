@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.125 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.126 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.125';
+    const VERSION = '0.0.126';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -718,7 +718,11 @@
             } else if (input instanceof Set) {
                 for (const item of input) output.add(allocate(item));
             } else {
-                for (const key of Object.keys(input)) {
+                // Object.keys() omits enumerable Symbol properties. Preserve
+                // those too, including their shared/cyclic value references.
+                const keys = [...Object.keys(input), ...Object.getOwnPropertySymbols(input)
+                    .filter(key => Object.prototype.propertyIsEnumerable.call(input, key))];
+                for (const key of keys) {
                     Object.defineProperty(output, key, {
                         value: allocate(input[key]), enumerable: true, writable: true, configurable: true
                     });
@@ -749,7 +753,7 @@
 
     function cloneNodeWithState(source, copyState = false, deepState = copyState) {
         const cloned = source.cloneNode(true);
-        // Copy each source node exactly once, including the root. In v0.0.125
+        // Copy each source node exactly once, including the root. In v0.0.126
         // the root was accidentally omitted from deep managed-state clones.
         if (copyState && !deepState) copyManagedState(source, cloned);
         if (copyState && deepState) {
