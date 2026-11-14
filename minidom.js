@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.22 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.24 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.22';
+    const VERSION = '0.0.24';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -123,6 +123,31 @@
             if (ch === ']') bracket--;
             if (ch === '(') paren++;
             if (ch === ')') paren--;
+            if (!bracket && !paren && part.startsWith(':not(', i)) {
+                // Support negation of a single MiniDOM pseudo without passing
+                // nonstandard selectors to the browser's CSS parser.
+                const start = i + 5;
+                let depth = 1, end = start, nestedQuote = '';
+                for (; end < part.length && depth; end++) {
+                    const c = part[end];
+                    if (nestedQuote) {
+                        if (c === '\\') { end++; continue; }
+                        if (c === nestedQuote) nestedQuote = '';
+                    } else if (c === '\"' || c === "'") nestedQuote = c;
+                    else if (c === '\\') end++;
+                    else if (c === '(') depth++;
+                    else if (c === ')') depth--;
+                }
+                if (depth === 0) {
+                    const inner = part.slice(start, end - 1).trim();
+                    customPseudo.lastIndex = 0;
+                    const nested = customPseudo.exec(inner);
+                    if (nested && nested.index === 0 && nested[0].length === inner.length) {
+                        tests.push({ negate: nested[1] });
+                        i = end; continue;
+                    }
+                }
+            }
             if (!bracket && !paren && ch === ':') {
                 customPseudo.lastIndex = i;
                 const match = customPseudo.exec(part);
@@ -136,6 +161,9 @@
     }
 
     function applyPseudo(elements, test) {
+        if (typeof test === 'object' && test.negate) {
+            return elements.filter(element => !selectorMatch(element, ':' + test.negate));
+        }
         const n = elements.length;
         if (test === 'first') return elements.slice(0, 1);
         if (test === 'last') return elements.slice(-1);
@@ -383,7 +411,8 @@
                     record.type === token.type && record.handler === handler &&
                     record.selector === selector && record.capture === capture &&
                     record.namespaces.join('.') === token.namespaces.join('.') &&
-                    record.eventData === eventData)) continue;
+                    record.eventData === eventData && record.once === removeOnce &&
+                    record.signal === signal)) continue;
                 const record = {
                     type: token.type, namespaces: token.namespaces, selector, handler,
                     options: nativeOptions, capture, once: removeOnce,
@@ -606,7 +635,10 @@
         if (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) {
             const result = Object.create(Object.getPrototypeOf(value));
             seen.set(value, result);
-            for (const key of Object.keys(value)) result[key] = copyDataValue(value[key], seen);
+            for (const key of Object.keys(value)) {
+                Object.defineProperty(result, key, { value: copyDataValue(value[key], seen),
+                    enumerable: true, writable: true, configurable: true });
+            }
             return result;
         }
         return value;
@@ -1522,6 +1554,9 @@
             for (const record of [...(eventMemory.get(element) || [])]) {
                 if (!matchesToken(record, token) || record.selector !== null) continue;
                 if (record.once) unbindRecord(element, record);
+                if (record.eventData !== undefined) event.data = record.eventData;
+                event.delegateTarget = element;
+                event.handleObj = { type: record.type, selector: null, handler: record.handler };
                 result = record.handler.call(element, event);
                 if (result === false) event.preventDefault();
             }
