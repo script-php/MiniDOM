@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.108 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.109 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.108';
+    const VERSION = '0.0.109';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2063,13 +2063,15 @@
             return this.each((i, element) => {
                 if (seen.has(element)) return;
                 seen.add(element);
+                // The document element contains <head> and <body>; moving
+                // either inside an arbitrary wrapper corrupts HTML structure.
+                // Check validity before cloning any managed wrapper state.
+                if (!element || (element.nodeType !== 1 && element.nodeType !== 11) ||
+                    element === element.ownerDocument?.documentElement) return;
                 const wrapper = cloneNodeWithState(template, true);
                 let deepest = wrapper;
                 while (deepest.firstElementChild) deepest = deepest.firstElementChild;
                 // Template descendants live in .content, not element.childNodes.
-                // Text, comment, document and window cannot safely host a
-                // wrapper. Skip them without interrupting mixed collections.
-                if (!element || (element.nodeType !== 1 && element.nodeType !== 11)) return;
                 const target = element.nodeType === 1 && element.localName === 'template' &&
                     element.namespaceURI === 'http://www.w3.org/1999/xhtml'
                     ? element.content : element;
