@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.71 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.72 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.71';
+    const VERSION = '0.0.72';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -795,6 +795,20 @@
             }
             return true;
         });
+    }
+
+    // Filter replacement targets in one ancestor walk per target, rather than
+    // comparing each target against every source. Sources may not replace
+    // themselves or their own descendants.
+    function replacementTargets(targets, sources) {
+        const sourceSet = new Set(sources);
+        return topLevelNodes(targets.filter(node => {
+            if (!isNode(node) || !node.parentNode) return false;
+            for (let current = node; current; current = current.parentNode) {
+                if (sourceSet.has(current)) return false;
+            }
+            return true;
+        }));
     }
 
     // For multiple destinations: clone for all but the final destination;
@@ -1951,9 +1965,7 @@
             // A source selection may contain an ancestor and its descendants.
             // Moving both independently would flatten the source subtree.
             const sources = topLevelNodes(this.elements.filter(isNode));
-            const targets = topLevelNodes([...select(target)].filter(node => node.parentNode &&
-                !sources.some(source => source === node ||
-                    (source.contains && source.contains(node)))));
+            const targets = replacementTargets([...select(target)], sources);
             const inserted = [];
             targets.forEach((node, i) => {
                 const copies = i === targets.length - 1 ? sources :
@@ -2050,13 +2062,11 @@
         }
 
         replaceWith(...content) {
-            const targets = topLevelNodes(this.elements.filter(element => element.parentNode && isNode(element)));
             const flattened = content.flatMap(contentNodes);
             // Moving a selected parent already moves its descendants. Inserting
             // both would detach the descendants and flatten the source tree.
             const source = topLevelNodes(flattened);
-            const validTargets = targets.filter(element => !source.some(node =>
-                node === element || (node.contains && node.contains(element))));
+            const validTargets = replacementTargets(this.elements, source);
             validTargets.forEach((element, index) => {
                 const copies = index === validTargets.length - 1
                     ? source
