@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.112 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.113 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.112';
+    const VERSION = '0.0.113';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -636,6 +636,13 @@
             if (current.nodeType === 1 && current.localName === 'template' &&
                 current.namespaceURI === 'http://www.w3.org/1999/xhtml') {
                 stack.push(current.content);
+            }
+            // Open shadow roots are separate DOM subtrees, not childNodes.
+            // A removed host must release MiniDOM-managed listeners, data,
+            // observers and animations inside its shadow tree as well.
+            // Closed roots cannot be reached through the public DOM API.
+            if (current.nodeType === 1 && current.shadowRoot) {
+                stack.push(current.shadowRoot);
             }
             cleanNode(current);
         }
