@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.17 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.21 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.17';
+    const VERSION = '0.0.21';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -177,9 +177,14 @@
         // Fast path: avoid parsing and intermediate arrays for ordinary CSS.
         // Reset regex state explicitly because the pseudo detector is global.
         customPseudo.lastIndex = 0;
-        const extended = /\[[\w:-]+\s*!=/.test(selector) ||
+        // Most selectors have no MiniDOM-only syntax. Avoid tokenizing them.
+        // The complete parser is still used for candidates, so quoted text
+        // and escaped pseudo-like fragments retain their native CSS meaning.
+        const possibleExtension = /:(?:visible|hidden|input|contains|first|last|eq|lt|gt|even|odd|header|parent|selected|checkbox|radio|button|text|file|password|submit|reset|animated)(?![\w-])|\[[\w:-]+\s*!=/.test(selector);
+        const extended = possibleExtension && (
+            /\[[\w:-]+\s*!=/.test(selector) ||
             splitSelector(selector, true).some(group => splitSelector(group).some(token =>
-                !/^[>+~ ]$/.test(token) && pseudoParts(token).tests.length > 0));
+                !/^[>+~ ]$/.test(token) && pseudoParts(token).tests.length > 0)));
         if (!extended) {
             if (roots.length === 1) {
                 const root = roots[0];
@@ -200,7 +205,7 @@
                 for (const root of current) {
                     if (!root) continue;
                     if (combinator === ' ') {
-                        if (root.querySelectorAll) found.push(...root.querySelectorAll(nativeCSS));
+                        if (root.querySelectorAll) for (const match of root.querySelectorAll(nativeCSS)) found.push(match);
                     } else if (combinator === '>') {
                         for (const child of root.children || []) if (child.matches(nativeCSS)) found.push(child);
                     } else if (combinator === '+') {
@@ -216,7 +221,7 @@
                 for (const test of tests) current = applyPseudo(current, test);
                 combinator = ' ';
             }
-            all.push(...current);
+            for (const match of current) all.push(match);
         }
         return unique(all);
     }
@@ -360,7 +365,8 @@
         const removeOnce = once || Boolean(options && typeof options === 'object' && options.once);
         const nativeOptions = options && typeof options === 'object'
             ? { ...options, once: false } : options;
-        const capture = typeof nativeOptions === 'boolean' ? nativeOptions : Boolean(nativeOptions?.capture);
+        const capture = (selector !== null && tokens.some(token => token.type === 'focus' || token.type === 'blur')) ||
+            (typeof nativeOptions === 'boolean' ? nativeOptions : Boolean(nativeOptions?.capture));
         const eventData = options && typeof options === 'object' ? options.data : undefined;
 
         return collection.each((i, element) => {
@@ -384,7 +390,14 @@
                     if (selector !== null) {
                         const target = event.target?.nodeType === 1
                             ? event.target : event.target?.parentElement;
-                        const match = target?.closest(selector);
+                        // Native closest() cannot understand MiniDOM custom
+                        // pseudo-selectors. Walk ancestors and use our matcher.
+                        // Stop at the delegation root; never match outside it.
+                        let match = target;
+                        while (match && match !== element) {
+                            if (match.nodeType === 1 && selectorMatch(match, selector)) break;
+                            match = match.parentElement;
+                        }
                         if (!match || match === element || !element.contains?.(match)) return;
                         context = match;
                     }
@@ -543,8 +556,16 @@
 
     function cleanTree(node) {
         if (!node) return;
-        for (const child of [...(node.childNodes || [])]) cleanTree(child);
-        cleanNode(node);
+        // Iterative post-order traversal avoids stack overflow on very deep DOM.
+        const stack = [[node, false]];
+        while (stack.length) {
+            const [current, visited] = stack.pop();
+            if (visited) { cleanNode(current); continue; }
+            stack.push([current, true]);
+            const children = current.childNodes;
+            if (children) for (let i = children.length - 1; i >= 0; i--)
+                stack.push([children[i], false]);
+        }
     }
 
     function cleanChildren(node) {
@@ -611,15 +632,16 @@
         if (copyState) copyManagedState(source, cloned);
         if (deepState) {
             // A pairwise walk handles elements, text, comments and fragments.
-            const walk = (from, to) => {
-                for (let i = 0; i < from.childNodes.length; i++) {
+            const stack = [[source, cloned]];
+            while (stack.length) {
+                const [from, to] = stack.pop();
+                for (let i = from.childNodes.length - 1; i >= 0; i--) {
                     const fromChild = from.childNodes[i];
                     const toChild = to.childNodes[i];
                     copyManagedState(fromChild, toChild);
-                    walk(fromChild, toChild);
+                    stack.push([fromChild, toChild]);
                 }
-            };
-            walk(source, cloned);
+            }
         }
         return cloned;
     }
@@ -647,7 +669,7 @@
     // For multiple destinations: clone for all but the final destination;
     // move original source nodes into the last. Preserve insertion order.
     function insertNodes(destinations, source, position) {
-        const targets = Array.from(destinations).filter(target =>
+        const targets = unique(Array.from(destinations)).filter(target =>
             (position === 'before' || position === 'after')
                 ? Boolean(target.parentNode && target.before && target.after)
                 : Boolean(target.append && target.prepend)
@@ -670,9 +692,9 @@
                 : source.map(node => cloneNodeWithState(node, true));
             if (!copies.length) return;
             const fragment = global.document.createDocumentFragment();
-            fragment.append(...copies);
+            for (const copy of copies) fragment.appendChild(copy);
             target[position](fragment);
-            inserted.push(...copies);
+            for (const copy of copies) inserted.push(copy);
         });
         return inserted;
     }
@@ -780,20 +802,22 @@
         }
 
         parent(selector) {
+            const accepts = selector == null ? null : matcher(selector);
             const found = [];
             for (const element of this.elements) {
                 const parent = element.parentElement;
-                if (parent && (!selector || parent.matches(selector))) found.push(parent);
+                if (parent && (!accepts || accepts(parent))) found.push(parent);
             }
             return this._push(found);
         }
 
         children(selector) {
+            const accepts = selector == null ? null : matcher(selector);
             const found = [];
             for (const element of this.elements) {
                 if (!element.children) continue;
                 for (const child of element.children) {
-                    if (!selector || child.matches(selector)) found.push(child);
+                    if (!accepts || accepts(child)) found.push(child);
                 }
             }
             return this._push(found);
@@ -837,8 +861,8 @@
             const found = [];
             for (const element of this.elements) {
                 if (element.contentDocument) found.push(element.contentDocument);
-                else if (element.tagName === 'TEMPLATE') found.push(...element.content.childNodes);
-                else if (element.childNodes) found.push(...element.childNodes);
+                else if (element.tagName === 'TEMPLATE') for (const child of element.content.childNodes) found.push(child);
+                else if (element.childNodes) for (const child of element.childNodes) found.push(child);
             }
             return this._push(found);
         }
@@ -854,8 +878,8 @@
             this.each((i, element) => {
                 const value = callback.call(element, i, element);
                 if (value == null) return;
-                if (value instanceof Collection) found.push(...value.elements);
-                else if (Array.isArray(value)) found.push(...value);
+                if (value instanceof Collection) for (const item of value.elements) found.push(item);
+                else if (Array.isArray(value)) for (const item of value) found.push(item);
                 else found.push(value);
             });
             return this._push(found);
@@ -882,7 +906,10 @@
         // this returns the outer elements and preserves .end() traversal.
         has(selector) {
             if (typeof selector === 'string') {
-                return this._push(this.elements.filter(element => element.querySelector?.(selector)));
+                // querySelector() rejects MiniDOM-only pseudos; use the same
+                // selector path as $() so .has(':visible') works consistently.
+                return this._push(this.elements.filter(element =>
+                    queryExtended(selector, [element]).length > 0));
             }
             const targets = nodes(selector);
             return this._push(this.elements.filter(element =>
@@ -1272,8 +1299,8 @@
                 const observer = new global.MutationObserver(records => {
                     const added = [], removed = [];
                     for (const record of records) {
-                        added.push(...record.addedNodes);
-                        removed.push(...record.removedNodes);
+                        for (const node of record.addedNodes) added.push(node);
+                        for (const node of record.removedNodes) removed.push(node);
                     }
                     callback.call(root, { added, removed, records, root });
                 });
@@ -1635,9 +1662,13 @@
             targets.forEach((node, i) => {
                 const copies = i === targets.length - 1 ? this.elements :
                     this.elements.map(source => cloneNodeWithState(source, true));
-                node.replaceWith(...copies);
+                // Use a fragment: spreading tens of thousands of nodes as
+                // function arguments can throw RangeError in browsers.
+                const fragment = node.ownerDocument.createDocumentFragment();
+                for (const copy of copies) fragment.appendChild(copy);
+                node.replaceWith(fragment);
                 cleanTree(node);
-                inserted.push(...copies);
+                for (const copy of copies) inserted.push(copy);
             });
             return this._push(inserted);
         }
@@ -1699,12 +1730,14 @@
         replaceWith(...content) {
             const targets = this.elements.filter(element => element.parentNode && isNode(element));
             const source = content.flatMap(contentNodes);
-            targets.forEach((element, index) => {
-                const copies = index === targets.length - 1
+            const validTargets = targets.filter(element => !source.some(node =>
+                node === element || (node.contains && node.contains(element))));
+            validTargets.forEach((element, index) => {
+                const copies = index === validTargets.length - 1
                     ? source
                     : source.map(node => cloneNodeWithState(node, true));
                 const fragment = global.document.createDocumentFragment();
-                fragment.append(...copies);
+                for (const copy of copies) fragment.appendChild(copy);
                 element.parentNode.replaceChild(fragment, element);
                 // Any children moved out of the old element remain live.
                 cleanTree(element);
