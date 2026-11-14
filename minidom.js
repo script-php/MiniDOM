@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.100 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.101 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.100';
+    const VERSION = '0.0.101';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1849,7 +1849,13 @@
                 event.handleObj = { type: record.type, selector: null, handler: record.handler,
                     namespace: record.namespaces.join('.'), _record: record };
                 result = record.handler.call(element, event);
-                if (result === false) event.preventDefault();
+                // Match the native .on()/.one() return-false convention.
+                // There is no bubbling in triggerHandler(), but expose the
+                // same cancellation state to subsequent direct callbacks.
+                if (result === false) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
             }
             return result;
         }
