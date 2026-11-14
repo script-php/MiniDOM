@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.132 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.1.0 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.132';
+    const VERSION = '0.1.0';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -423,6 +423,10 @@
         const removeOnce = once || Boolean(options && typeof options === 'object' && options.once);
         const nativeOptions = options && typeof options === 'object'
             ? { ...options, once: false } : options;
+        // Manage AbortSignal ourselves, including signal-like objects whose hook can throw.
+        // Passing an arbitrary signal through the native addEventListener first can
+        // raise a browser-specific TypeError before our rollback logic executes.
+        if (nativeOptions && typeof nativeOptions === 'object') delete nativeOptions.signal;
         const requestedCapture = typeof nativeOptions === 'boolean'
             ? nativeOptions : Boolean(nativeOptions?.capture);
         const eventData = options && typeof options === 'object' ? options.data : undefined;
@@ -1366,6 +1370,11 @@
                     ? first.content.textContent : first?.textContent;
             }
             const roots = this._replacementRoots();
+            // Text and comment nodes support textContent too, even though
+            // HTML replacement deliberately limits its targets to containers.
+            for (const element of this.elements) {
+                if (isNode(element) && (element.nodeType === 3 || element.nodeType === 8)) roots.add(element);
+            }
             return this.each((i, element) => {
                 if (!roots.has(element)) return;
                 // Window and Document are valid selection roots but cannot
