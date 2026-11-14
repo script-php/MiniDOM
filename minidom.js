@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.110 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.111 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.110';
+    const VERSION = '0.0.111';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -799,6 +799,25 @@
         return unique(items).filter(node => {
             for (let parent = node.parentNode; parent; parent = parent.parentNode) {
                 if (selected.has(parent)) return false;
+            }
+            return true;
+        });
+    }
+
+    // Template contents live in an inert DocumentFragment whose parentNode is
+    // null. When a selected template and one of its content descendants are
+    // both selected for destructive removal/detachment, keep the descendant
+    // inside the detached template rather than pulling it out separately.
+    function removalRoots(items) {
+        const roots = topLevelNodes(items);
+        const selectedContents = new Set(roots.filter(node =>
+            node.nodeType === 1 && node.localName === 'template' &&
+            node.namespaceURI === 'http://www.w3.org/1999/xhtml')
+            .map(node => node.content));
+        if (!selectedContents.size) return roots;
+        return roots.filter(node => {
+            for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+                if (selectedContents.has(parent)) return false;
             }
             return true;
         });
@@ -2102,7 +2121,7 @@
             // Detaching each entry independently would pull children out of the
             // detached parent. Move only the top-level selected nodes; keep
             // the original collection and all managed state intact.
-            for (const element of topLevelNodes(this.elements.filter(isNode))) {
+            for (const element of removalRoots(this.elements.filter(isNode))) {
                 if (element.nodeType !== 9) element.parentNode?.removeChild(element);
             }
             return this;
@@ -2143,7 +2162,7 @@
             // subsequently detaching selected children from the removed tree,
             // which would unexpectedly alter the caller's detached subtree.
             // Clean managed state once per top-level removed subtree.
-            const roots = topLevelNodes(this.elements.filter(element =>
+            const roots = removalRoots(this.elements.filter(element =>
                 isNode(element) && element.nodeType !== 9));
             for (const element of roots) {
                 cleanTree(element);
