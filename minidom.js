@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.97 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.98 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.97';
+    const VERSION = '0.0.98';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -418,7 +418,7 @@
         const eventData = options && typeof options === 'object' ? options.data : undefined;
 
         return collection.each((i, element) => {
-            if (!element.addEventListener || signal?.aborted) return;
+            if (!element?.addEventListener || signal?.aborted) return;
             for (const token of tokens) {
                 // Capture is per event type: a mixed 'focus click' registration
                 // must not accidentally put click listeners in capture mode.
@@ -1812,7 +1812,7 @@
         // Unlike jQuery, this returns the last callback result (if any).
         triggerHandler(eventName, detail) {
             const element = this.get();
-            if (!element) return undefined;
+            if (element == null || (typeof element !== 'object' && typeof element !== 'function')) return undefined;
             const token = eventTokens(eventName)[0];
             if (!token || !token.type) throw new TypeError('Event type required');
             let result;
@@ -1854,7 +1854,7 @@
                 throw new TypeError('trigger() requires unnamespaced event types');
             }
             return this.each((i, element) => {
-                if (!element.dispatchEvent) return;
+                if (!element?.dispatchEvent) return;
                 for (const token of tokens) {
                     const options = { bubbles: true, cancelable: true };
                     const event = detail === undefined
