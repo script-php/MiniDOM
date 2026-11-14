@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.119 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.120 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.119';
+    const VERSION = '0.0.120';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2102,8 +2102,15 @@
                 element && element.nodeType === 1 && element.parentNode &&
                 element !== element.ownerDocument?.documentElement &&
                 element !== element.ownerDocument?.body));
-            const template = contentNodes(content).find(node => node.nodeType === 1);
-            if (!elements.length || !template) return this;
+            if (!elements.length) return this;
+            // Like jQuery, a functional wrapper is evaluated once using the
+            // first eligible element's index and existing HTML.
+            const first = elements[0];
+            const index = this.elements.indexOf(first);
+            const supplied = typeof content === 'function'
+                ? content.call(first, index, first.innerHTML) : content;
+            const template = contentNodes(supplied).find(node => node.nodeType === 1);
+            if (!template) return this;
             const wrapper = cloneNodeWithState(template, true);
             elements[0].before(wrapper);
             let deepest = wrapper;
@@ -2112,8 +2119,11 @@
             return this;
         }
         wrapInner(content) {
-            const template = contentNodes(content).find(node => node.nodeType === 1);
-            if (!template) return this;
+            // Static content can be parsed once; functional content is
+            // evaluated separately for each eligible, distinct destination.
+            const staticTemplate = typeof content === 'function' ? null :
+                contentNodes(content).find(node => node.nodeType === 1);
+            if (typeof content !== 'function' && !staticTemplate) return this;
             // A repeated destination should not receive another wrapper.
             // Keep the first occurrence's index and preserve collection chaining.
             const seen = new Set();
@@ -2125,6 +2135,12 @@
                 // Check validity before cloning any managed wrapper state.
                 if (!element || (element.nodeType !== 1 && element.nodeType !== 11) ||
                     element === element.ownerDocument?.documentElement) return;
+                const supplied = typeof content === 'function'
+                    ? content.call(element, i, element.innerHTML) : null;
+                const template = typeof content === 'function'
+                    ? contentNodes(supplied).find(node => node.nodeType === 1)
+                    : staticTemplate;
+                if (!template) return;
                 const wrapper = cloneNodeWithState(template, true);
                 let deepest = wrapper;
                 while (deepest.firstElementChild) deepest = deepest.firstElementChild;
@@ -2233,8 +2249,9 @@
         // Wrap each element with a copy of the first wrapper element.
         // Content can be trusted HTML or a native/MiniDOM element.
         wrap(content) {
-            const template = contentNodes(content).find(node => node.nodeType === 1);
-            if (!template) return this;
+            const staticTemplate = typeof content === 'function' ? null :
+                contentNodes(content).find(node => node.nodeType === 1);
+            if (typeof content !== 'function' && !staticTemplate) return this;
             // Wrap each distinct element once, even if the collection repeats it.
             const seen = new Set();
             return this.each((i, element) => {
@@ -2243,6 +2260,12 @@
                 if (!element || !element.parentNode || element.nodeType !== 1 ||
                     element === element.ownerDocument?.documentElement ||
                     element === element.ownerDocument?.body) return;
+                const supplied = typeof content === 'function'
+                    ? content.call(element, i, element.innerHTML) : null;
+                const template = typeof content === 'function'
+                    ? contentNodes(supplied).find(node => node.nodeType === 1)
+                    : staticTemplate;
+                if (!template) return;
                 const outer = cloneNodeWithState(template, true);
                 element.parentNode.insertBefore(outer, element);
                 let inner = outer;
