@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.67 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.70 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.69';
+    const VERSION = '0.0.70';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1943,9 +1943,9 @@
             // A source selection may contain an ancestor and its descendants.
             // Moving both independently would flatten the source subtree.
             const sources = topLevelNodes(this.elements.filter(isNode));
-            const targets = [...select(target)].filter(node => node.parentNode &&
+            const targets = topLevelNodes([...select(target)].filter(node => node.parentNode &&
                 !sources.some(source => source === node ||
-                    (source.contains && source.contains(node))));
+                    (source.contains && source.contains(node)))));
             const inserted = [];
             targets.forEach((node, i) => {
                 const copies = i === targets.length - 1 ? sources :
@@ -2042,7 +2042,7 @@
         }
 
         replaceWith(...content) {
-            const targets = this.elements.filter(element => element.parentNode && isNode(element));
+            const targets = topLevelNodes(this.elements.filter(element => element.parentNode && isNode(element)));
             const flattened = content.flatMap(contentNodes);
             // Moving a selected parent already moves its descendants. Inserting
             // both would detach the descendants and flatten the source tree.
