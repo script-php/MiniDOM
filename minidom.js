@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.4 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.5 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.4';
+    const VERSION = '0.0.5';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -390,6 +390,46 @@
             return this.each((i, element) => {
                 if ('value' in element) element.value = value == null ? '' : value;
             });
+        }
+
+        // Returns the browser's native successful-controls snapshot. Files
+        // stay as File objects, repeated field names remain separate entries.
+        // Like value getters, this reads the first selected element only.
+        formData(submitter) {
+            const form = this.get();
+            if (form === undefined) return undefined;
+            if (!(form instanceof global.HTMLFormElement)) {
+                throw new TypeError('formData() requires a <form> element');
+            }
+
+            // FormData(form, submitter) includes the clicked submit control,
+            // unlike FormData(form). The browser validates the submitter.
+            if (submitter !== undefined) {
+                const button = submitter instanceof Collection ? submitter.get() : submitter;
+                return new global.FormData(form, button);
+            }
+            return new global.FormData(form);
+        }
+
+        // jQuery-compatible value records. File entries are intentionally
+        // omitted: serializeArray()/serialize() are for URL-encoded text,
+        // while formData() is for multipart submissions and file uploads.
+        serializeArray() {
+            const data = this.formData();
+            if (!data) return [];
+            const entries = [];
+            for (const [name, value] of data) {
+                if (typeof value === 'string') entries.push({ name, value: value.replace(/\r?\n/g, '\r\n') });
+            }
+            return entries;
+        }
+
+        // Browser-native application/x-www-form-urlencoded encoding: repeated
+        // names, Unicode, spaces, reserved characters are handled correctly.
+        serialize() {
+            return new global.URLSearchParams(
+                this.serializeArray().map(({ name, value }) => [name, value])
+            ).toString();
         }
 
         attr(name, value) {
