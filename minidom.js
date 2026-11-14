@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.67 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.68 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.67';
+    const VERSION = '0.0.68';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -790,8 +790,15 @@
         // A descendant selected alongside its ancestor already travels with
         // that ancestor. Moving it separately would flatten the DOM tree.
         // Preserve the original order of the remaining top-level sources.
-        source = unique(source).filter(node => !source.some(other =>
-            other !== node && other.contains && other.contains(node)));
+        // Walk each source's actual ancestor chain instead of comparing every
+        // source against every other source (quadratic for large sibling lists).
+        const sourceSet = new Set(source);
+        source = unique(source).filter(node => {
+            for (let ancestor = node.parentNode; ancestor; ancestor = ancestor.parentNode) {
+                if (sourceSet.has(ancestor)) return false;
+            }
+            return true;
+        });
         const targets = unique(Array.from(destinations)).filter(target =>
             (position === 'before' || position === 'after')
                 ? Boolean(target.parentNode && target.before && target.after)
