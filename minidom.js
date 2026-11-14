@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.28 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.29 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.28';
+    const VERSION = '0.0.29';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -610,49 +610,49 @@
     // Copy user data without accidentally sharing ordinary nested objects.
     // Cycles and common built-in structured values are supported. Functions,
     // DOM nodes and non-plain class instances retain their identity.
-    function copyDataValue(value, seen = new WeakMap()) {
-        if (value === null || typeof value !== 'object') return value;
-        if (isNode(value)) return value;
-        if (seen.has(value)) return seen.get(value);
-        if (Array.isArray(value)) {
-            const result = [];
-            seen.set(value, result);
-            for (const item of value) result.push(copyDataValue(item, seen));
-            return result;
-        }
-        if (value instanceof Date) {
-            const result = new Date(value.getTime());
-            seen.set(value, result);
-            return result;
-        }
-        if (value instanceof RegExp) {
-            const result = new RegExp(value.source, value.flags);
-            result.lastIndex = value.lastIndex;
-            seen.set(value, result);
-            return result;
-        }
-        if (value instanceof Map) {
-            const result = new Map();
-            seen.set(value, result);
-            for (const [key, val] of value) result.set(copyDataValue(key, seen), copyDataValue(val, seen));
-            return result;
-        }
-        if (value instanceof Set) {
-            const result = new Set();
-            seen.set(value, result);
-            for (const item of value) result.add(copyDataValue(item, seen));
-            return result;
-        }
-        if (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) {
-            const result = Object.create(Object.getPrototypeOf(value));
-            seen.set(value, result);
-            for (const key of Object.keys(value)) {
-                Object.defineProperty(result, key, { value: copyDataValue(value[key], seen),
-                    enumerable: true, writable: true, configurable: true });
+    function copyDataValue(value) {
+        if (value === null || typeof value !== 'object' || isNode(value)) return value;
+        const seen = new WeakMap();
+        const pending = [];
+        function allocate(input) {
+            if (input === null || typeof input !== 'object' || isNode(input)) return input;
+            if (seen.has(input)) return seen.get(input);
+            let output;
+            if (Array.isArray(input)) output = new Array(input.length);
+            else if (input instanceof Date) output = new Date(input.getTime());
+            else if (input instanceof RegExp) {
+                output = new RegExp(input.source, input.flags);
+                output.lastIndex = input.lastIndex;
+            } else if (input instanceof Map) output = new Map();
+            else if (input instanceof Set) output = new Set();
+            else {
+                const prototype = Object.getPrototypeOf(input);
+                if (prototype !== Object.prototype && prototype !== null) return input;
+                output = Object.create(prototype);
             }
-            return result;
+            seen.set(input, output);
+            if (Array.isArray(input) || input instanceof Map || input instanceof Set ||
+                (Object.getPrototypeOf(input) === Object.prototype || Object.getPrototypeOf(input) === null)) {
+                pending.push([input, output]);
+            }
+            return output;
         }
-        return value;
+        const root = allocate(value);
+        while (pending.length) {
+            const [input, output] = pending.pop();
+            if (input instanceof Map) {
+                for (const [key, item] of input) output.set(allocate(key), allocate(item));
+            } else if (input instanceof Set) {
+                for (const item of input) output.add(allocate(item));
+            } else {
+                for (const key of Object.keys(input)) {
+                    Object.defineProperty(output, key, {
+                        value: allocate(input[key]), enumerable: true, writable: true, configurable: true
+                    });
+                }
+            }
+        }
+        return root;
     }
 
     // Only MiniDOM-managed listeners can be copied; the browser provides no
