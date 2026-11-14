@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.30 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.31 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.30';
+    const VERSION = '0.0.31';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -437,7 +437,7 @@
                     if (removeOnce) unbindRecord(element, record);
                     event.data = eventData;
                     event.delegateTarget = element;
-                    event.handleObj = { type: token.type, selector, handler };
+                    event.handleObj = { type: token.type, selector, handler, namespace: token.namespaces.join('.'), _record: record };
                     handler.call(context, event);
                 };
                 const listenerOptions = capture && !requestedCapture
@@ -1557,7 +1557,15 @@
         off(events, selector, handler) {
             if (events && typeof events === 'object' && events.handleObj) {
                 const info = events.handleObj;
-                return this.off(info.type, info.selector, info.handler);
+                // Remove only the exact registration which dispatched this event.
+                // A callback may also be registered under other namespaces,
+                // capture modes or AbortSignals on the same element.
+                if (info._record) return this.each((i, element) => {
+                    if ((eventMemory.get(element) || []).includes(info._record))
+                        unbindRecord(element, info._record);
+                });
+                return this.off(info.type + (info.namespace ? '.' + info.namespace : ''),
+                    info.selector, info.handler);
             }
             if (typeof selector === 'function') {
                 handler = selector;
@@ -1585,7 +1593,16 @@
             if (!token || !token.type) throw new TypeError('Event type required');
             let result;
             const event = new global.CustomEvent(token.type, { detail, cancelable: true });
+            // triggerHandler invokes callbacks directly (without native dispatch),
+            // so emulate immediate-propagation cancellation for this loop.
+            let immediateStopped = false;
+            const nativeStopImmediate = event.stopImmediatePropagation.bind(event);
+            event.stopImmediatePropagation = () => {
+                immediateStopped = true;
+                nativeStopImmediate();
+            };
             for (const record of [...(eventMemory.get(element) || [])]) {
+                if (immediateStopped) break;
                 if (!matchesToken(record, token) || record.selector !== null) continue;
                 // A previous handler can remove another handler while we iterate.
                 // Do not invoke records that have already been unbound.
@@ -1594,7 +1611,8 @@
                 // Do not leak event.data from a preceding handler.
                 event.data = record.eventData;
                 event.delegateTarget = element;
-                event.handleObj = { type: record.type, selector: null, handler: record.handler };
+                event.handleObj = { type: record.type, selector: null, handler: record.handler,
+                    namespace: record.namespaces.join('.'), _record: record };
                 result = record.handler.call(element, event);
                 if (result === false) event.preventDefault();
             }
