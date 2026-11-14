@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.45 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.46 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.45';
+    const VERSION = '0.0.46';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -601,21 +601,21 @@
 
     function cleanTree(node) {
         if (!node) return;
-        // Iterative post-order traversal avoids stack overflow on very deep DOM.
-        const stack = [[node, false]];
+        // Cleanup has no dependency on child-before-parent ordering. A single
+        // pre-order stack avoids allocating two stack entries per DOM node.
+        // Snapshot children before cleaning the current node: cancelling
+        // observers or animations must not affect traversal coverage.
+        const stack = [node];
         while (stack.length) {
-            const [current, visited] = stack.pop();
-            if (visited) { cleanNode(current); continue; }
-            stack.push([current, true]);
-            // A template's descendants are stored in its content fragment.
-            // Destructive removal must clean their managed state as well.
-            if (current.nodeType === 1 && current.localName === 'template' &&
-                current.namespaceURI === 'http://www.w3.org/1999/xhtml') {
-                stack.push([current.content, false]);
-            }
+            const current = stack.pop();
             const children = current.childNodes;
             if (children) for (let i = children.length - 1; i >= 0; i--)
-                stack.push([children[i], false]);
+                stack.push(children[i]);
+            if (current.nodeType === 1 && current.localName === 'template' &&
+                current.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+                stack.push(current.content);
+            }
+            cleanNode(current);
         }
     }
 
