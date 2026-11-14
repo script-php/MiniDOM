@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.120 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.121 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.120';
+    const VERSION = '0.0.121';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -2092,6 +2092,16 @@
             });
             return this._push(inserted);
         }
+        // A <template> wrapper stores its actual children in .content.
+        // Appending to the element itself creates inaccessible light-DOM
+        // children instead of the intended inert template contents.
+        _wrapperDestination(wrapper) {
+            let deepest = wrapper;
+            while (deepest.firstElementChild) deepest = deepest.firstElementChild;
+            return deepest.localName === 'template' &&
+                deepest.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                ? deepest.content : deepest;
+        }
         wrapAll(content) {
             // Deduplicate selections and keep only top-level elements. A
             // repeated element must not be moved to the end of its own
@@ -2113,9 +2123,8 @@
             if (!template) return this;
             const wrapper = cloneNodeWithState(template, true);
             elements[0].before(wrapper);
-            let deepest = wrapper;
-            while (deepest.firstElementChild) deepest = deepest.firstElementChild;
-            for (const element of elements) deepest.appendChild(element);
+            const destination = this._wrapperDestination(wrapper);
+            for (const element of elements) destination.appendChild(element);
             return this;
         }
         wrapInner(content) {
@@ -2142,13 +2151,12 @@
                     : staticTemplate;
                 if (!template) return;
                 const wrapper = cloneNodeWithState(template, true);
-                let deepest = wrapper;
-                while (deepest.firstElementChild) deepest = deepest.firstElementChild;
+                const destination = this._wrapperDestination(wrapper);
                 // Template descendants live in .content, not element.childNodes.
                 const target = element.nodeType === 1 && element.localName === 'template' &&
                     element.namespaceURI === 'http://www.w3.org/1999/xhtml'
                     ? element.content : element;
-                while (target.firstChild) deepest.appendChild(target.firstChild);
+                while (target.firstChild) destination.appendChild(target.firstChild);
                 target.append(wrapper);
             });
         }
@@ -2268,9 +2276,7 @@
                 if (!template) return;
                 const outer = cloneNodeWithState(template, true);
                 element.parentNode.insertBefore(outer, element);
-                let inner = outer;
-                while (inner.firstElementChild) inner = inner.firstElementChild;
-                inner.appendChild(element);
+                this._wrapperDestination(outer).appendChild(element);
             });
         }
 
