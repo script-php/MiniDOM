@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.14 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.15 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.14';
+    const VERSION = '0.0.15';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -64,35 +64,134 @@
             return created;
         }
 
-        const extension = /^(.*?)(:visible|:hidden|:input|:contains\((?:[^()]|\([^()]*\))*\))$/s.exec(trimmed);
-        if (extension) {
-            const base = extension[1].trim() || '*';
-            return Array.from(select(base, context)).filter(element => selectorMatch(element, extension[2]));
-        }
+        const roots = context === undefined ? [global.document] :
+            typeof context === 'string' ? select(context) : nodes(context);
+        return queryExtended(trimmed, roots);
+    }
 
-        // A context can itself be a CSS selector, node, or MiniDOM collection.
-        const roots = context === undefined
-            ? [global.document]
-            : typeof context === 'string'
-                ? global.document.querySelectorAll(context)
-                : nodes(context);
-
-        // The constructor deduplicates once; avoid extra sets and temporary
-        // arrays when there is only one root (the common case).
-        if (roots.length === 1) {
-            const root = roots[0];
-            return root && typeof root.querySelectorAll === 'function'
-                ? root.querySelectorAll(value)
-                : [];
-        }
-
-        const found = [];
-        for (const root of roots) {
-            if (root && typeof root.querySelectorAll === 'function') {
-                for (const element of root.querySelectorAll(value)) found.push(element);
+    // Split a selector only at top-level commas/combinators. Native CSS stays
+    // in querySelectorAll; MiniDOM extensions are filtered at each path step.
+    function splitSelector(input, splitCommas = false) {
+        const result = []; let buffer = '', quote = '', bracket = 0, paren = 0;
+        for (let i = 0; i < input.length; i++) {
+            const ch = input[i];
+            if (quote) {
+                buffer += ch;
+                if (ch === '\\' && i + 1 < input.length) buffer += input[++i];
+                else if (ch === quote) quote = '';
+                continue;
             }
+            if (ch === '"' || ch === "'") { quote = ch; buffer += ch; continue; }
+            if (ch === '[') bracket++;
+            if (ch === ']') bracket--;
+            if (ch === '(') paren++;
+            if (ch === ')') paren--;
+            if (!bracket && !paren && (splitCommas ? ch === ',' : /[>+~\s]/.test(ch))) {
+                if (buffer.trim()) result.push(buffer.trim());
+                buffer = '';
+                if (!splitCommas && /[>+~]/.test(ch)) result.push(ch);
+                else if (!splitCommas && !/\s/.test(result[result.length - 1] || '')) {
+                    if (result[result.length - 1] !== ' ' && !/[>+~]/.test(result[result.length - 1] || '')) result.push(' ');
+                }
+                continue;
+            }
+            buffer += ch;
         }
-        return found;
+        if (buffer.trim()) result.push(buffer.trim());
+        if (!splitCommas && result[result.length - 1] === ' ') result.pop();
+        return result;
+    }
+
+    const customPseudo = /:(visible|hidden|input|contains\((?:[^()]|\([^()]*\))*\)|first(?!-)|last(?!-)|eq\(-?\d+\)|lt\(-?\d+\)|gt\(-?\d+\)|even|odd|header|parent|selected|checkbox|radio|button|text|file|password|submit|reset|animated)(?![\w-])/g;
+
+    function pseudoParts(part) {
+        const tests = [];
+        // Do not strip pseudo-like text inside CSS attribute values.
+        let css = '', quote = '', bracket = 0, paren = 0;
+        for (let i = 0; i < part.length;) {
+            const ch = part[i];
+            if (quote) {
+                css += ch;
+                if (ch === '\\' && i + 1 < part.length) css += part[++i];
+                else if (ch === quote) quote = '';
+                i++; continue;
+            }
+            if (ch === '"' || ch === "'") { quote = ch; css += ch; i++; continue; }
+            if (ch === '[') bracket++;
+            if (ch === ']') bracket--;
+            if (ch === '(') paren++;
+            if (ch === ')') paren--;
+            if (!bracket && !paren && ch === ':') {
+                customPseudo.lastIndex = i;
+                const match = customPseudo.exec(part);
+                if (match && match.index === i) {
+                    tests.push(match[1]); i = customPseudo.lastIndex; continue;
+                }
+            }
+            css += ch; i++;
+        }
+        return { css: css.trim() || '*', tests };
+    }
+
+    function applyPseudo(elements, test) {
+        const n = elements.length;
+        if (test === 'first') return elements.slice(0, 1);
+        if (test === 'last') return elements.slice(-1);
+        if (test === 'even') return elements.filter((_, i) => i % 2 === 0);
+        if (test === 'odd') return elements.filter((_, i) => i % 2 === 1);
+        const positional = /^(eq|lt|gt)\((-?\d+)\)$/.exec(test);
+        if (positional) {
+            let index = Number(positional[2]); if (index < 0) index += n;
+            return elements.filter((_, i) => positional[1] === 'eq' ? i === index :
+                positional[1] === 'lt' ? i < index : i > index);
+        }
+        return elements.filter(element => selectorMatch(element, ':' + test));
+    }
+
+    function queryExtended(selector, roots) {
+        // Keep standard CSS selection on the browser's fast, complete parser.
+        customPseudo.lastIndex = 0;
+        if (!customPseudo.test(selector) && !/\[[\w:-]+\s*!=/.test(selector)) {
+            const found = [];
+            for (const root of roots) if (root?.querySelectorAll)
+                found.push(...root.querySelectorAll(selector));
+            return unique(found);
+        }
+        const all = [];
+        for (const group of splitSelector(selector, true)) {
+            const tokens = splitSelector(group);
+            let current = [...roots], combinator = ' ';
+            for (const token of tokens) {
+                if (/^[>+~ ]$/.test(token)) { combinator = token; continue; }
+                const { css, tests } = pseudoParts(token);
+                const notEqual = [];
+                const nativeCSS = css.replace(/\[([\w:-]+)\s*!=\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))\]/g,
+                    (_, name, double, single, bare) => {
+                        notEqual.push([name, double ?? single ?? bare]); return '';
+                    }) || '*';
+                const found = [];
+                for (const root of current) {
+                    if (!root) continue;
+                    if (combinator === ' ') {
+                        if (root.querySelectorAll) found.push(...root.querySelectorAll(nativeCSS));
+                    } else if (combinator === '>') {
+                        for (const child of root.children || []) if (child.matches(nativeCSS)) found.push(child);
+                    } else if (combinator === '+') {
+                        const next = root.nextElementSibling;
+                        if (next?.matches(nativeCSS)) found.push(next);
+                    } else if (combinator === '~') {
+                        let next = root.nextElementSibling;
+                        while (next) { if (next.matches(nativeCSS)) found.push(next); next = next.nextElementSibling; }
+                    }
+                }
+                current = unique(found).filter(el => notEqual.every(([name, value]) =>
+                    el.getAttribute?.(name) !== value));
+                for (const test of tests) current = applyPseudo(current, test);
+                combinator = ' ';
+            }
+            all.push(...current);
+        }
+        return unique(all);
     }
 
     function classes(value) {
@@ -264,6 +363,8 @@
                     }
                     if (removeOnce) unbindRecord(element, record);
                     if (eventData !== undefined) event.data = eventData;
+                    event.delegateTarget = element;
+                    event.handleObj = { type: token.type, selector, handler };
                     handler.call(context, event);
                 };
                 const listenerOptions = selector !== null && (token.type === 'focus' || token.type === 'blur')
@@ -549,6 +650,18 @@
     function selectorMatch(element, selector) {
         if (typeof selector !== 'string') return false;
         if (selector === ':input') return element.matches?.('input,select,textarea,button') || false;
+        if (selector === ':header') return element.matches?.('h1,h2,h3,h4,h5,h6') || false;
+        if (selector === ':parent') return Boolean(element.childNodes?.length);
+        if (selector === ':selected') return Boolean(element.selected);
+        if (selector === ':animated') return Boolean(fadeMemory.get(element));
+        const form = /^:(checkbox|radio|button|text|file|password|submit|reset)$/.exec(selector);
+        if (form) {
+            const type = form[1];
+            if (type === 'button') return element.matches?.('button,input[type="button"]') || false;
+            if (type === 'text') return element.matches?.('input:not([type]),input[type="text"]') || false;
+            return element.matches?.('input[type="' + type + '"]') || false;
+        }
+
         if (selector === ':visible') return new Collection([element]).isVisible();
         if (selector === ':hidden') return !new Collection([element]).isVisible();
         const content = /^:contains\((.*)\)$/s.exec(selector.trim());
@@ -558,7 +671,15 @@
                 (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
             return (element.textContent || '').includes(value);
         }
-        return typeof element.matches === 'function' && element.matches(selector);
+        if (typeof element.matches !== 'function') return false;
+        customPseudo.lastIndex = 0;
+        if (customPseudo.test(selector)) {
+            customPseudo.lastIndex = 0;
+            const root = element.getRootNode?.() || global.document;
+            return queryExtended(selector, [root]).includes(element);
+        }
+        customPseudo.lastIndex = 0;
+        return element.matches(selector);
     }
 
     function matcher(selector) {
@@ -618,14 +739,12 @@
         end() { return this.previous || new Collection([]); }
 
         find(selector) {
-            // Collect directly instead of creating an array per root via
-            // flatMap + spread. _push() still removes overlapping duplicates.
-            const found = [];
-            for (const element of this.elements) {
-                if (typeof element.querySelectorAll !== 'function') continue;
-                for (const child of element.querySelectorAll(selector)) found.push(child);
+            if (typeof selector !== 'string') {
+                const targets = nodes(selector);
+                return this._push(targets.filter(target => this.elements.some(root =>
+                    root !== target && root.contains?.(target))));
             }
-            return this._push(found);
+            return this._push(queryExtended(selector, this.elements));
         }
 
         parent(selector) {
@@ -648,11 +767,15 @@
             return this._push(found);
         }
 
-        closest(selector) {
+        closest(selector, context) {
             const found = [];
             for (const element of this.elements) {
                 if (typeof element.closest !== 'function') continue;
-                const match = element.closest(selector);
+                const boundary = context == null ? null :
+                    (typeof context === 'string' ? select(context)[0] : nodes(context)[0]);
+                let match = element;
+                while (match && match !== boundary && !selectorMatch(match, selector)) match = match.parentElement;
+                if (match === boundary) match = null;
                 if (match) found.push(match);
             }
             return this._push(found);
@@ -709,6 +832,8 @@
         odd() { return this._push(this.elements.filter((_, i) => i % 2 === 1)); }
 
         filter(selector) {
+            if (typeof selector === 'string' && /^:(first|last|even|odd|eq\(-?\d+\)|lt\(-?\d+\)|gt\(-?\d+\))$/.test(selector))
+                return this._push(applyPseudo(this.elements, selector.slice(1)));
             return this._push(this.elements.filter(matcher(selector)));
         }
 
@@ -883,11 +1008,21 @@
         }
 
         attr(name, value) {
+            if (name && typeof name === 'object') {
+                return this.each((i, element) => {
+                    for (const [key, val] of Object.entries(name)) {
+                        const next = typeof val === 'function' ? val.call(element, i, element.getAttribute(key)) : val;
+                        if (next === null) element.removeAttribute(key);
+                        else if (next !== undefined) element.setAttribute(key, String(next));
+                    }
+                });
+            }
             if (value === undefined) return this.get()?.getAttribute?.(name);
             return this.each((i, element) => {
                 if (!element.setAttribute) return;
-                if (value === null) element.removeAttribute(name);
-                else element.setAttribute(name, String(value));
+                const next = typeof value === 'function' ? value.call(element, i, element.getAttribute(name)) : value;
+                if (next === null) element.removeAttribute(name);
+                else if (next !== undefined) element.setAttribute(name, String(next));
             });
         }
 
@@ -899,6 +1034,13 @@
         }
 
         css(property, value) {
+            if (Array.isArray(property)) {
+                const element = this.get();
+                if (!element) return undefined;
+                const style = global.getComputedStyle(element), result = {};
+                for (const name of property) result[name] = style.getPropertyValue(cssName(name));
+                return result;
+            }
             if (property && typeof property === 'object') {
                 return this.each((i, element) => {
                     if (!element.style) return;
@@ -1160,7 +1302,19 @@
         }
 
         // Document coordinates, including the current page scroll.
-        offset() {
+        offset(value) {
+            if (value !== undefined) return this.each((i, element) => {
+                const next = typeof value === 'function' ? value.call(element, i, new Collection([element]).offset()) : value;
+                if (!next || !element.style) return;
+                const style = global.getComputedStyle(element);
+                if (style.position === 'static') element.style.position = 'relative';
+                const current = new Collection([element]).offset();
+                for (const axis of ['top', 'left']) {
+                    if (next[axis] == null) continue;
+                    const old = parseFloat(global.getComputedStyle(element)[axis]);
+                    element.style[axis] = ((Number.isFinite(old) ? old : 0) + next[axis] - current[axis]) + 'px';
+                }
+            });
             const element = this.get();
             if (!element || typeof element.getBoundingClientRect !== 'function') return undefined;
             const rect = element.getBoundingClientRect();
@@ -1256,6 +1410,10 @@
         // Direct: .on('click', handler[, options])
         // Delegated: .on('click', '.child', handler[, options])
         on(events, selector, handler, options) {
+            if (events && typeof events === 'object') {
+                for (const [type, fn] of Object.entries(events)) this.on(type, selector, fn, handler);
+                return this;
+            }
             return bindEvents(this, events, selector, handler, options, false);
         }
 
@@ -1268,6 +1426,10 @@
         // Repeated .on() registrations with the same callback/selector/type/
         // namespace/capture are automatically deduplicated.
         off(events, selector, handler) {
+            if (events && typeof events === 'object' && events.handleObj) {
+                const info = events.handleObj;
+                return this.off(info.type, info.selector, info.handler);
+            }
             if (typeof selector === 'function') {
                 handler = selector;
                 selector = undefined;
@@ -1334,11 +1496,14 @@
         prop(name, value) {
             if (name && typeof name === 'object') {
                 return this.each((i, element) => {
-                    for (const [key, val] of Object.entries(name)) element[key] = val;
+                    for (const [key, val] of Object.entries(name))
+                        element[key] = typeof val === 'function' ? val.call(element, i, element[key]) : val;
                 });
             }
             if (value === undefined) return this.get()?.[name];
-            return this.each((i, element) => { element[name] = value; });
+            return this.each((i, element) => {
+                element[name] = typeof value === 'function' ? value.call(element, i, element[name]) : value;
+            });
         }
 
         // .data(key) reads a cached value or parses a data-* attribute.
@@ -1385,21 +1550,37 @@
         // Manipulation methods mutate the current selection and return it.
         // HTML strings are parsed by the browser: never pass untrusted HTML.
         append(...content) {
+            if (content.some(item => typeof item === 'function')) {
+                return this.each((i, el) => new Collection([el]).append(...content.map(item =>
+                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+            }
             insertNodes(this.elements, content.flatMap(contentNodes), 'append');
             return this;
         }
 
         prepend(...content) {
+            if (content.some(item => typeof item === 'function')) {
+                return this.each((i, el) => new Collection([el]).prepend(...content.map(item =>
+                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+            }
             insertNodes(this.elements, content.flatMap(contentNodes), 'prepend');
             return this;
         }
 
         before(...content) {
+            if (content.some(item => typeof item === 'function')) {
+                return this.each((i, el) => new Collection([el]).before(...content.map(item =>
+                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+            }
             insertNodes(this.elements, content.flatMap(contentNodes), 'before');
             return this;
         }
 
         after(...content) {
+            if (content.some(item => typeof item === 'function')) {
+                return this.each((i, el) => new Collection([el]).after(...content.map(item =>
+                    typeof item === 'function' ? item.call(el, i, el.innerHTML) : item)));
+            }
             insertNodes(this.elements, content.flatMap(contentNodes), 'after');
             return this;
         }
