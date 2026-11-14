@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.130 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.131 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.130';
+    const VERSION = '0.0.131';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -704,6 +704,15 @@
             if (seen.has(input)) return seen.get(input);
             let output;
             if (Array.isArray(input)) output = new Array(input.length);
+            else if (input instanceof ArrayBuffer) output = input.slice(0);
+            else if (ArrayBuffer.isView(input)) {
+                // Views must point at the same *cloned* backing buffer, not
+                // independently copied buffers. Preserve offsets and lengths.
+                const buffer = allocate(input.buffer);
+                output = input instanceof DataView
+                    ? new DataView(buffer, input.byteOffset, input.byteLength)
+                    : new input.constructor(buffer, input.byteOffset, input.length);
+            }
             else if (input instanceof Date) output = new Date(input.getTime());
             else if (input instanceof RegExp) {
                 output = new RegExp(input.source, input.flags);
