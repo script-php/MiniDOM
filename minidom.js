@@ -2,7 +2,7 @@
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.38';
+    const VERSION = '0.0.39';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -604,6 +604,12 @@
             const [current, visited] = stack.pop();
             if (visited) { cleanNode(current); continue; }
             stack.push([current, true]);
+            // A template's descendants are stored in its content fragment.
+            // Destructive removal must clean their managed state as well.
+            if (current.nodeType === 1 && current.localName === 'template' &&
+                current.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+                stack.push([current.content, false]);
+            }
             const children = current.childNodes;
             if (children) for (let i = children.length - 1; i >= 0; i--)
                 stack.push([children[i], false]);
@@ -1107,9 +1113,15 @@
         }
 
         text(value) {
-            if (value === undefined) return this.get()?.textContent;
+            if (value === undefined) {
+                const first = this.get();
+                return first?.localName === 'template' && first.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                    ? first.content.textContent : first?.textContent;
+            }
             return this.each((i, element) => {
-                const next = typeof value === 'function' ? value.call(element, i, element.textContent) : value;
+                const previous = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                    ? element.content.textContent : element.textContent;
+                const next = typeof value === 'function' ? value.call(element, i, previous) : value;
                 // Convert before destroying managed state: user-defined toString()
                 // can throw, in which case the existing subtree must survive.
                 const prepared = next == null ? '' : String(next);
@@ -1886,8 +1898,10 @@
         empty() {
             return this.each((i, element) => {
                 if (!element.replaceChildren) return;
-                cleanChildren(element);
-                element.replaceChildren();
+                const target = element.localName === 'template' && element.namespaceURI === 'http://www.w3.org/1999/xhtml'
+                    ? element.content : element;
+                cleanChildren(target);
+                target.replaceChildren();
             });
         }
 
