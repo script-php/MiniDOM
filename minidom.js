@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.68 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.67 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.68';
+    const VERSION = '0.0.69';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -784,6 +784,19 @@
         return result;
     }
 
+    // Keep selected roots in their original order, discarding descendants
+    // already carried by a selected ancestor. Also deduplicate references.
+    // This avoids quadratic pairwise comparisons for large sibling selections.
+    function topLevelNodes(items) {
+        const selected = new Set(items);
+        return unique(items).filter(node => {
+            for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+                if (selected.has(parent)) return false;
+            }
+            return true;
+        });
+    }
+
     // For multiple destinations: clone for all but the final destination;
     // move original source nodes into the last. Preserve insertion order.
     function insertNodes(destinations, source, position) {
@@ -792,13 +805,7 @@
         // Preserve the original order of the remaining top-level sources.
         // Walk each source's actual ancestor chain instead of comparing every
         // source against every other source (quadratic for large sibling lists).
-        const sourceSet = new Set(source);
-        source = unique(source).filter(node => {
-            for (let ancestor = node.parentNode; ancestor; ancestor = ancestor.parentNode) {
-                if (sourceSet.has(ancestor)) return false;
-            }
-            return true;
-        });
+        source = topLevelNodes(source);
         const targets = unique(Array.from(destinations)).filter(target =>
             (position === 'before' || position === 'after')
                 ? Boolean(target.parentNode && target.before && target.after)
@@ -1935,8 +1942,7 @@
         replaceAll(target) {
             // A source selection may contain an ancestor and its descendants.
             // Moving both independently would flatten the source subtree.
-            const sources = this.elements.filter(source => !this.elements.some(other =>
-                other !== source && isNode(other) && other.contains?.(source)));
+            const sources = topLevelNodes(this.elements.filter(isNode));
             const targets = [...select(target)].filter(node => node.parentNode &&
                 !sources.some(source => source === node ||
                     (source.contains && source.contains(node))));
@@ -2040,8 +2046,7 @@
             const flattened = content.flatMap(contentNodes);
             // Moving a selected parent already moves its descendants. Inserting
             // both would detach the descendants and flatten the source tree.
-            const source = flattened.filter(node => !flattened.some(other =>
-                other !== node && isNode(other) && other.contains?.(node)));
+            const source = topLevelNodes(flattened);
             const validTargets = targets.filter(element => !source.some(node =>
                 node === element || (node.contains && node.contains(element))));
             validTargets.forEach((element, index) => {
