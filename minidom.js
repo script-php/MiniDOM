@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.21 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.22 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.21';
+    const VERSION = '0.0.22';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -365,13 +365,17 @@
         const removeOnce = once || Boolean(options && typeof options === 'object' && options.once);
         const nativeOptions = options && typeof options === 'object'
             ? { ...options, once: false } : options;
-        const capture = (selector !== null && tokens.some(token => token.type === 'focus' || token.type === 'blur')) ||
-            (typeof nativeOptions === 'boolean' ? nativeOptions : Boolean(nativeOptions?.capture));
+        const requestedCapture = typeof nativeOptions === 'boolean'
+            ? nativeOptions : Boolean(nativeOptions?.capture);
         const eventData = options && typeof options === 'object' ? options.data : undefined;
 
         return collection.each((i, element) => {
             if (!element.addEventListener || signal?.aborted) return;
             for (const token of tokens) {
+                // Capture is per event type: a mixed 'focus click' registration
+                // must not accidentally put click listeners in capture mode.
+                const capture = requestedCapture || (selector !== null &&
+                    (token.type === 'focus' || token.type === 'blur'));
                 const records = eventMemory.get(element) || [];
                 // The same callback, selector, type, namespaces and capture mode
                 // is registered only once on an element.
@@ -407,8 +411,8 @@
                     event.handleObj = { type: token.type, selector, handler };
                     handler.call(context, event);
                 };
-                const listenerOptions = selector !== null && (token.type === 'focus' || token.type === 'blur')
-                    ? { ...(typeof nativeOptions === 'object' ? nativeOptions : {}), capture: true }
+                const listenerOptions = capture && !requestedCapture
+                    ? { ...(typeof nativeOptions === 'object' && nativeOptions ? nativeOptions : {}), capture: true }
                     : nativeOptions;
                 record.options = listenerOptions;
                 element.addEventListener(token.type, record.wrapped, listenerOptions);
