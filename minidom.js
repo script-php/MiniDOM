@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.102 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.103 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.102';
+    const VERSION = '0.0.103';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1219,13 +1219,32 @@
             );
         }
 
+        // Snapshot replacement destinations before mutating the DOM. A selected
+        // descendant must not be modified after its selected ancestor removes
+        // it; HTML template content has a separate DocumentFragment root.
+        _replacementRoots() {
+            const eligible = this.elements.filter(element =>
+                isNode(element) && element.nodeType !== 9 &&
+                (element.nodeType === 1 || element.nodeType === 11));
+            const selected = new Set(eligible);
+            return new Set(topLevelNodes(eligible).filter(element => {
+                for (let parent = element.parentNode; parent; parent = parent.parentNode) {
+                    if (parent.nodeType === 11 && eligible.some(candidate =>
+                        candidate.localName === 'template' && candidate.content === parent)) return false;
+                }
+                return true;
+            }));
+        }
+
         text(value) {
             if (value === undefined) {
                 const first = this.get();
                 return first?.localName === 'template' && first.namespaceURI === 'http://www.w3.org/1999/xhtml'
                     ? first.content.textContent : first?.textContent;
             }
+            const roots = this._replacementRoots();
             return this.each((i, element) => {
+                if (!roots.has(element)) return;
                 // Window and Document are valid selection roots but cannot
                 // receive text content. In particular, never create an
                 // accidental window.textContent property.
@@ -1246,7 +1265,9 @@
 
         html(value) {
             if (value === undefined) return this.get()?.innerHTML;
+            const roots = this._replacementRoots();
             return this.each((i, element) => {
+                if (!roots.has(element)) return;
                 if ('innerHTML' in element) {
                     const next = typeof value === 'function' ? value.call(element, i, element.innerHTML) : value;
                     // Parse into a detached template before cleaning existing
