@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.1 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.2 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.1';
+    const VERSION = '0.0.2';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -55,10 +55,64 @@
         return String(events).trim().split(/\s+/).filter(Boolean);
     }
 
+    // An insertion accepts HTML/text, native nodes, MiniDOM selections, and
+    // (possibly nested) iterables of these. Raw HTML must be trusted.
+    function contentNodes(value) {
+        if (value == null) return [];
+        if (typeof value === 'string') {
+            const template = global.document.createElement('template');
+            template.innerHTML = value;
+            return [...template.content.childNodes];
+        }
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            return [global.document.createTextNode(String(value))];
+        }
+        if (value instanceof Collection) return [...value.elements];
+        if (isNode(value)) return [value];
+        if (typeof value[Symbol.iterator] === 'function') {
+            return [...value].flatMap(contentNodes);
+        }
+        return [];
+    }
+
+    // For multiple destinations: clone for all but the final destination;
+    // move original source nodes into the last. Preserve insertion order.
+    function insertNodes(destinations, source, position) {
+        const targets = destinations.filter(target =>
+            (position === 'before' || position === 'after')
+                ? Boolean(target.parentNode && target.before && target.after)
+                : Boolean(target.append && target.prepend)
+        );
+        const inserted = [];
+        targets.forEach((target, index) => {
+            const copies = index === targets.length - 1
+                ? source
+                : source.map(node => node.cloneNode(true));
+            if (!copies.length) return;
+            const fragment = global.document.createDocumentFragment();
+            fragment.append(...copies);
+            target[position](fragment);
+            inserted.push(...copies);
+        });
+        return inserted;
+    }
+
+    function matching(element, selector, index) {
+        if (typeof selector === 'function') {
+            return Boolean(selector.call(element, index, element));
+        }
+        if (typeof selector === 'string') {
+            return typeof element.matches === 'function' && element.matches(selector);
+        }
+        return nodes(selector).includes(element);
+    }
+
     class Collection {
         constructor(elements, previous = null) {
             this.elements = unique(elements);
             this.previous = previous;
+            // jQuery-like [0], [1], ... access (native nodes, not wrappers).
+            this.elements.forEach((element, index) => { this[index] = element; });
         }
 
         get length() {
@@ -108,9 +162,44 @@
         }
 
         filter(selector) {
-            return this._push(this.elements.filter(element =>
-                typeof element.matches === 'function' && element.matches(selector)
+            return this._push(this.elements.filter((element, index) =>
+                matching(element, selector, index)
             ));
+        }
+
+        not(selector) {
+            return this._push(this.elements.filter((element, index) =>
+                !matching(element, selector, index)
+            ));
+        }
+
+        is(selector) {
+            return this.elements.some((element, index) => matching(element, selector, index));
+        }
+
+        add(selector, context) {
+            return this._push(unique([...this.elements, ...select(selector, context)]));
+        }
+
+        siblings(selector) {
+            return this._push(unique(this.elements.flatMap(element =>
+                element.parentElement ? [...element.parentElement.children]
+                    .filter(sibling => sibling !== element) : []
+            ).filter((element, index) => selector === undefined || matching(element, selector, index))));
+        }
+
+        next(selector) {
+            return this._push(unique(this.elements.map(element => element.nextElementSibling)
+                .filter(Boolean).filter((element, index) =>
+                    selector === undefined || matching(element, selector, index)
+                )));
+        }
+
+        prev(selector) {
+            return this._push(unique(this.elements.map(element => element.previousElementSibling)
+                .filter(Boolean).filter((element, index) =>
+                    selector === undefined || matching(element, selector, index)
+                )));
         }
 
         addClass(names) {
@@ -280,6 +369,49 @@
                 }
                 if (remaining.length) eventMemory.set(element, remaining);
                 else eventMemory.delete(element);
+            });
+        }
+
+        // Manipulation methods mutate the current selection and return it.
+        // HTML strings are parsed by the browser: never pass untrusted HTML.
+        append(...content) {
+            insertNodes(this.elements, content.flatMap(contentNodes), 'append');
+            return this;
+        }
+
+        prepend(...content) {
+            insertNodes(this.elements, content.flatMap(contentNodes), 'prepend');
+            return this;
+        }
+
+        before(...content) {
+            insertNodes(this.elements, content.flatMap(contentNodes), 'before');
+            return this;
+        }
+
+        after(...content) {
+            insertNodes(this.elements, content.flatMap(contentNodes), 'after');
+            return this;
+        }
+
+        // These return the inserted selection (which may include clones),
+        // so .end() returns to the original source selection.
+        appendTo(target) {
+            return this._push(insertNodes(select(target), this.elements, 'append'));
+        }
+
+        prependTo(target) {
+            return this._push(insertNodes(select(target), this.elements, 'prepend'));
+        }
+
+        clone() {
+            // Native cloneNode copies child nodes/attributes, not listeners.
+            return this._push(this.elements.map(element => element.cloneNode(true)));
+        }
+
+        empty() {
+            return this.each((i, element) => {
+                if (element.replaceChildren) element.replaceChildren();
             });
         }
 
