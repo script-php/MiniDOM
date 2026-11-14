@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.131 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.132 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.131';
+    const VERSION = '0.0.132';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -705,6 +705,14 @@
             let output;
             if (Array.isArray(input)) output = new Array(input.length);
             else if (input instanceof ArrayBuffer) output = input.slice(0);
+            else if (typeof global.SharedArrayBuffer === 'function' &&
+                input instanceof global.SharedArrayBuffer) {
+                // Unlike ArrayBuffer, SharedArrayBuffer has no slice-based
+                // isolation guarantee for consumers. Copy its bytes into a
+                // separate shared backing store, preserving graph aliasing.
+                output = new global.SharedArrayBuffer(input.byteLength);
+                new Uint8Array(output).set(new Uint8Array(input));
+            }
             else if (ArrayBuffer.isView(input)) {
                 // Views must point at the same *cloned* backing buffer, not
                 // independently copied buffers. Preserve offsets and lengths.
