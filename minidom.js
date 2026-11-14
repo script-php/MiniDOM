@@ -1,8 +1,8 @@
-/* MiniDOM v0.0.92 — small, chainable DOM helper. No dependencies. */
+/* MiniDOM v0.0.93 — small, chainable DOM helper. No dependencies. */
 (function (global) {
     'use strict';
 
-    const VERSION = '0.0.92';
+    const VERSION = '0.0.93';
     const previousDollar = global.$;
     const displayMemory = new WeakMap();
     const eventMemory = new WeakMap();
@@ -1343,7 +1343,7 @@
         attr(name, value) {
             if (name && typeof name === 'object') {
                 return this.each((i, element) => {
-                    if (!element.setAttribute || !element.getAttribute) return;
+                    if (!element?.setAttribute || !element.getAttribute) return;
                     for (const [key, val] of Object.entries(name)) {
                         const next = typeof val === 'function' ? val.call(element, i, element.getAttribute(key)) : val;
                         if (next === null) element.removeAttribute(key);
@@ -1353,7 +1353,7 @@
             }
             if (value === undefined) return this.get()?.getAttribute?.(name);
             return this.each((i, element) => {
-                if (!element.setAttribute) return;
+                if (!element?.setAttribute) return;
                 const next = typeof value === 'function' ? value.call(element, i, element.getAttribute(name)) : value;
                 if (next === null) element.removeAttribute(name);
                 else if (next !== undefined) element.setAttribute(name, String(next));
@@ -1363,7 +1363,7 @@
         removeAttr(name) {
             const names = String(name).trim().split(/\s+/).filter(Boolean);
             return this.each((i, element) => {
-                for (const attr of names) element.removeAttribute?.(attr);
+                for (const attr of names) element?.removeAttribute?.(attr);
             });
         }
 
@@ -1377,7 +1377,7 @@
             }
             if (property && typeof property === 'object') {
                 return this.each((i, element) => {
-                    if (!element.style) return;
+                    if (!element?.style) return;
                     for (const [name, newValue] of Object.entries(property)) {
                         const key = cssName(name);
                         const computed = typeof newValue === 'function'
@@ -1402,7 +1402,7 @@
                     declarations.push([name, parsed.getPropertyValue(name), parsed.getPropertyPriority(name)]);
                 }
                 return this.each((i, element) => {
-                    if (!element.style) return;
+                    if (!element?.style) return;
                     for (const [name, newValue, priority] of declarations) {
                         element.style.setProperty(name, newValue, priority);
                     }
@@ -1418,7 +1418,7 @@
             }
 
             return this.each((i, element) => {
-                if (!element.style) return;
+                if (!element?.style) return;
                 const computed = typeof value === 'function'
                     ? value.call(element, i, global.getComputedStyle(element).getPropertyValue(key))
                     : value;
@@ -1429,7 +1429,7 @@
 
         hide() {
             return this.each((i, element) => {
-                if (!element.style) return;
+                if (!element?.style) return;
                 if (!displayMemory.has(element)) {
                     const original = element.style.getPropertyValue('display');
                     displayMemory.set(element, {
@@ -1443,7 +1443,7 @@
 
         show() {
             return this.each((i, element) => {
-                if (!element.style) return;
+                if (!element?.style) return;
                 const stored = displayMemory.get(element);
                 if (stored) {
                     if (stored.value) element.style.setProperty('display', stored.value, stored.priority);
@@ -1464,7 +1464,7 @@
         _dimension(axis, value) {
             if (value === undefined) return dimensionOf(this.get(), axis);
             return this.each((i, element) => {
-                if (!element.style) return;
+                if (!element?.style) return;
                 const previous = dimensionOf(element, axis);
                 const next = typeof value === 'function' ? value.call(element, i, previous) : value;
                 if (next == null) { element.style.removeProperty(axis); return; }
@@ -1498,7 +1498,7 @@
         _boxDimension(axis, box, value, includeMargin = false) {
             if (value === undefined) return dimensionOf(this.get(), axis, box, includeMargin);
             return this.each((i, element) => {
-                if (!element.style) return;
+                if (!element?.style) return;
                 const current = dimensionOf(element, axis, box, includeMargin);
                 const next = typeof value === 'function' ? value.call(element, i, current) : value;
                 if (next == null) { element.style.removeProperty(axis); return; }
@@ -1616,7 +1616,7 @@
         _fade(show, duration) {
             if (!Number.isFinite(duration) || duration < 0) throw new TypeError('Invalid duration');
             return this.each((i, element) => {
-                if (!element.style) return;
+                if (!element?.style) return;
                 const previous = fadeMemory.get(element);
                 if (previous) previous.cancel();
                 if (show) new Collection([element]).show();
